@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Verrou réseau : la page ne peut joindre que sa propre origine (ses fichiers et version.json).
+     Aucune requête vers un autre serveur n'est possible ; les fichiers analysés restent sur le poste. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="theme-color" content="#0a5fb4">
+<title>XML Browser</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<section id="list" class="screen">
+  <header class="bar">
+    <h1>Fichiers de réconciliation</h1>
+    <span id="dirName" class="dirname"></span>
+    <span class="spacer"></span>
+    <button id="version" type="button" class="version" title="Vérifier si une mise à jour est disponible"></button>
+    <button id="refresh" type="button" hidden title="Relire le répertoire">Relire</button>
+    <button id="pickRar" type="button">Ouvrir des archives RAR</button>
+    <button id="pick" type="button" class="primary">Choisir un répertoire</button>
+    <input type="file" id="dirInput" webkitdirectory multiple hidden>
+    <input type="file" id="rarInput" accept=".rar" multiple hidden>
+  </header>
+
+  <div id="progress" class="progress" hidden><div id="progressBar"></div><span id="progressText"></span></div>
+
+  <div id="selbar" class="selbar" hidden>
+    <label>Client <select id="selClient" title="Raccourci : C"></select></label>
+    <label>Date <select id="selDate" title="Date de dispense ou de refund. Raccourci : D"></select></label>
+    <input id="filter" type="search" placeholder="Filtrer par fichier, date ou client" aria-label="Filtrer les lignes">
+    <button id="selClear" type="button" hidden>Tout afficher</button>
+    <span class="spacer"></span>
+    <label class="check" title="N'afficher que les 5 premiers caractères du nom de fichier"><input type="checkbox" id="shortNames"> Noms courts</label>
+    <label class="check"><input type="checkbox" id="recursive"> Sous-répertoires</label>
+    <button id="openSynth" type="button" title="Raccourci : S">Synthèse par client</button>
+    <button id="csv" type="button">Exporter en CSV</button>
+    <span id="synth" class="synth" aria-live="polite"></span>
+  </div>
+
+  <div id="notes" class="notes" hidden>
+    <span id="legend" class="legend" hidden><i class="dc0"></i><i class="dc1"></i><i class="dc2"></i><i class="dc3"></i>En couleur : fichier donnant plusieurs lignes (plusieurs dates ou plusieurs clients), une couleur par fichier concerné.</span>
+    <details id="ignored" hidden>
+      <summary id="ignoredSummary"></summary>
+      <ul id="ignoredList"></ul>
+    </details>
+  </div>
+
+  <main id="empty" class="empty">
+    <div class="empty-inner">
+      <p class="empty-title">Choisissez le répertoire qui contient vos fichiers XML, ou une archive RAR.</p>
+      <p>Vous pouvez aussi glisser un répertoire ou des archives dans cette fenêtre. Les fichiers sont lus sur ce poste, rien n'est envoyé ailleurs.</p>
+      <p id="emptyDetail" class="empty-detail"></p>
+    </div>
+  </main>
+
+  <div id="tableWrap" class="tablewrap" tabindex="0" hidden aria-label="Statistiques par fichier, client et date">
+    <table id="table">
+      <thead id="thead"></thead>
+      <tbody id="tbody"></tbody>
+      <tfoot id="tfoot"></tfoot>
+    </table>
+  </div>
+
+  <footer id="hint" class="hint" hidden>
+    <span><kbd>↑</kbd> <kbd>↓</kbd> parcourir</span>
+    <span><kbd>Entrée</kbd> ou clic : ouvrir le fichier</span>
+    <span><kbd>/</kbd> filtrer</span>
+    <span><kbd>C</kbd> client</span>
+    <span><kbd>D</kbd> date</span>
+    <span><kbd>S</kbd> synthèse</span>
+    <span id="count" class="count"></span>
+  </footer>
+</section>
+
+<section id="viewer" class="screen" hidden>
+  <div id="summary" class="summary"></div>
+  <div class="vbar">
+    <button id="vBack" type="button" title="Échap">Retour au tableau</button>
+    <span class="sep"></span>
+    <button id="vSearch" type="button" title="Ctrl+F">Rechercher</button>
+    <span class="sep"></span>
+    <button id="vFoldRec" type="button">Replier les enregistrements</button>
+    <button id="vUnfold" type="button">Tout déplier</button>
+    <span class="grp" id="vLevels"><span class="grp-label">Replier au niveau</span></span>
+    <span class="sep" id="vDateSep" hidden></span>
+    <span class="grp" id="vDateNav" hidden>
+      <span class="grp-label" id="vDateLabel"></span>
+      <button id="vPrev" type="button" title="Enregistrement précédent de cette date">Précédent</button>
+      <button id="vNext" type="button" title="Enregistrement suivant de cette date">Suivant</button>
+    </span>
+  </div>
+  <div id="editor" class="editor"></div>
+  <div id="status" class="status"><span id="statusPath" class="path"></span><span id="statusNote" class="note"></span><span id="statusPos"></span></div>
+</section>
+
+<section id="synthScreen" class="screen" hidden>
+  <header class="bar">
+    <button id="sBack" type="button" title="Échap">Retour au tableau</button>
+    <h1>Synthèse par client</h1>
+    <span id="sScope" class="dirname"></span>
+  </header>
+  <div class="synth-body">
+    <div id="sTableWrap" class="tablewrap flat" tabindex="0" aria-label="Synthèse par client">
+      <table>
+        <thead id="sHead"></thead>
+        <tbody id="sBody"></tbody>
+      </table>
+    </div>
+    <figure class="viz-root">
+      <figcaption id="vizCaption"></figcaption>
+      <div id="viz"></div>
+    </figure>
+  </div>
+  <footer class="hint">
+    <span><kbd>↑</kbd> <kbd>↓</kbd> changer de client : les graphes suivent</span>
+    <span><kbd>Entrée</kbd> voir les lignes de ce client dans le tableau</span>
+    <span><kbd>Échap</kbd> retour</span>
+  </footer>
+</section>
+
+<div id="toast" class="toast" hidden><span id="toastText"></span><button id="toastAction" type="button" hidden></button></div>
+
+<script src="viewer.js"></script>
+<script src="charts.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
