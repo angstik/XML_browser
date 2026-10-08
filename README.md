@@ -19,7 +19,9 @@ Application en ligne : <https://angstik.github.io/XML_browser/>
 - **Sélections** : par client, par date, filtre texte, tri par colonne, noms de fichier
   raccourcis à 5 caractères, export CSV.
 - **Synthèse par client** : totaux par client, et deux graphes par jour (nombre, valeur HT)
-  pour les dispenses et les refunds, avec leur tableau.
+  pour les dispenses et les refunds, avec leur tableau. L'axe des jours est continu, un trait
+  vertical marque chaque 1er du mois, les deux graphes défilent ensemble et s'exportent en
+  image PNG.
 - **Visionneuse XML** en lecture seule : coloration, recherche, repli par élément ou par niveau.
 
 Clavier : `↑` `↓` parcourir, `Entrée` ouvrir, `Échap` revenir, `/` filtrer, `C` client,

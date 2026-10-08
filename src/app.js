@@ -664,7 +664,10 @@
           // Le nom se tronque, les étiquettes de doublon restent toujours visibles.
           td.classList.add("file"); td.title = r.path;
           const wrap = el("span", "fwrap");
-          wrap.appendChild(el("span", "fname", displayName(r.path)));
+          // Nom trop long : c'est le début qui est coupé, la fin (le nom du fichier) reste lisible.
+          const name = el("span", "fname");
+          name.appendChild(el("bdi", null, displayName(r.path)));
+          wrap.appendChild(name);
           if (r.dup) for (const t of dupTags(r)) wrap.appendChild(el("span", "tag", t));
           td.appendChild(wrap);
         } else if (c.type === "check") {
@@ -942,7 +945,13 @@
     const dated = days.filter((d) => d.date);
     const span = !dated.length ? "" : dated.length === 1 ? ", le " + dated[0].date : ", du " + dated[0].date + " au " + dated[dated.length - 1].date;
     $("vizCaption").textContent = "Par jour : " + r.label + span;
-    window.DayCharts.render($("viz"), { days, charts: CHARTS, series: SERIES, fmtDate: fmtDay });
+    const slug = r.label.normalize("NFD").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "client";
+    window.DayCharts.render($("viz"), {
+      days, charts: CHARTS, series: SERIES, fmtDate: fmtDay,
+      title: $("vizCaption").textContent,
+      fileName: "graphes-" + slug + ".png",
+      onExport: (err) => toast(err ? "Export impossible : " + errText(err) : "Image enregistrée dans vos téléchargements."),
+    });
   }
 
   function openSynth() {

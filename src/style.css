@@ -187,7 +187,8 @@ td.c-client { font-family: var(--mono); font-size: 13px; }
 
 td.file { font-family: var(--mono); font-size: 13px; }
 .fwrap { display: flex; align-items: center; max-width: 46ch; }
-.fname { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fname { overflow: hidden; text-overflow: ellipsis; min-width: 0; white-space: nowrap; direction: rtl; text-align: left; }
+.fname bdi { direction: ltr; unicode-bidi: isolate; }
 .fwrap .tag { flex: none; }
 td.zero { color: var(--muted); }
 .tag { font-family: var(--sans); font-size: 11px; font-weight: 600; margin-left: 8px; padding: 1px 6px; border-radius: 3px; background: color-mix(in srgb, var(--dc) 16%, var(--surface)); color: var(--dc); }
@@ -267,14 +268,21 @@ tfoot td:first-child { z-index: 3; }
 }
 .viz-root figcaption { font-size: 15px; font-weight: 650; margin-bottom: 10px; }
 .viz-head { display: flex; align-items: center; gap: 16px; }
-.viz-legend { display: flex; gap: 18px; font-size: 13px; }
+.viz-legend { display: flex; gap: 18px; font-size: 13px; margin-right: auto; }
 .viz-key { display: inline-flex; align-items: center; gap: 6px; }
 .viz-key i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
 i.s1 { background: var(--series-1); }
 i.s2 { background: var(--series-2); }
-.viz-head button { margin-left: auto; font-size: 13px; padding: 3px 9px; }
+.viz-head { gap: 8px; }
+.viz-head button { font-size: 13px; padding: 3px 9px; }
 .viz-title { font-size: 13px; font-weight: 600; color: var(--muted); margin: 16px 0 2px; }
-.viz-scroll { overflow-x: auto; }
+.viz-row { display: flex; }
+.viz-row > svg { flex: none; }
+.viz-scroll { overflow-x: auto; flex: 1; min-width: 0; }
+.viz-month { stroke: var(--muted); stroke-width: 1; }
+.viz-month-label { font: 600 11px var(--sans); fill: var(--muted); }
+/* Export : couleurs du thème clair, quel que soit le thème affiché. */
+.viz-export { --series-1: #2a78d6; --series-2: #eb6834; --grid: #e6eaee; --axis: #b9c2cb; --ink: #17212b; --muted: #5e6b78; --surface: #ffffff; }
 .viz-scroll svg { display: block; }
 .viz-grid { stroke: var(--grid); stroke-width: 1; }
 .viz-axis { stroke: var(--axis); stroke-width: 1; }

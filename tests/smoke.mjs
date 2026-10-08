@@ -1,7 +1,7 @@
 // Test de bout en bout de la PWA construite (dist/) : npm run build && npm test
 // Les jeux d'essai sont fabriqués ici ; aucun fichier réel n'est nécessaire.
 import { chromium } from "playwright";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -113,11 +113,30 @@ try {
   assert.deepEqual(synth.map((r) => r[0]), ["Tous les clients", "AAA (K1)", "BBB (K2)"]);
   // Tous : 8 flux ; HT = 96 − 6 = 90 ; refunds HT = (12 − 2) + 5 = 15 ; net HT = 75.
   assert.deepEqual([synth[0][1], synth[0][2], synth[0][3], synth[0][4], synth[0][8], synth[0][10]], ["4", "3", "8", "90,00", "15,00", "75,00"]);
-  assert.equal(await page.$$eval("#viz svg", (s) => s.length), 2, "deux graphes : nombre et valeur HT");
+  assert.equal(await page.$$eval("#viz .viz-chart", (s) => s.length), 2, "deux graphes : nombre et valeur HT");
+  // Le 1er janvier ouvre l'axe : un trait de début de mois par graphe, avec son libellé.
+  assert.deepEqual(await page.$$eval("#viz .viz-month-label", (t) => t.map((x) => x.textContent)), ["janv. 2026", "janv. 2026"]);
+  // Les deux graphes défilent ensemble.
+  const lefts = await page.evaluate(async () => {
+    const [a, b] = document.querySelectorAll("#viz .viz-scroll");
+    a.firstElementChild.style.minWidth = b.firstElementChild.style.minWidth = "5000px";   // force le défilement
+    a.scrollLeft = 300;
+    await new Promise((r) => setTimeout(r, 100));
+    const out = [a.scrollLeft, b.scrollLeft];
+    a.scrollLeft = 0;
+    return out;
+  });
+  assert.deepEqual(lefts, [300, 300], "défilement synchronisé");
+  // Export en image : un PNG valide, plus large que haut.
+  const [download] = await Promise.all([page.waitForEvent("download"), page.click("#viz .viz-export-btn")]);
+  assert.equal(download.suggestedFilename(), "graphes-tous-les-clients.png");
+  const png = readFileSync(await download.path());
+  assert.deepEqual([...png.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "signature PNG");
+  assert.ok(png.readUInt32BE(16) > png.readUInt32BE(20) && png.readUInt32BE(20) > 600, "dimensions de l'image");
   assert.equal(await page.$$eval("#viz .viz-chart:first-child .viz-bar", (b) => b.length), 5, "3 jours de dispense + 2 jours de refund");
   await page.keyboard.press("ArrowDown");
   assert.match(await page.textContent("#vizCaption"), /AAA \(K1\).*du 2026-01-01 au 2026-01-02/);
-  await page.click("#viz .viz-head button");
+  await page.click("#viz .viz-toggle");
   const dayTable = await cells("#viz .viz-table tbody tr");
   assert.deepEqual(dayTable, [["2026-01-01", "3", "30,00", "1", "10,00"], ["2026-01-02", "1", "10,00", "0", "0,00"]]);
   await page.keyboard.press("ArrowDown");          // les flèches changent de client même si le focus est sur un bouton
@@ -128,7 +147,7 @@ try {
   await page.keyboard.press("Enter");
   await page.waitForSelector("#synthScreen", { state: "hidden" });
   assert.equal((await cells("#tbody tr")).length, 2, "retour au tableau filtré sur le client");
-  step("synthèse par client, graphes et tableau des jours");
+  step("synthèse par client, graphes synchronisés, export image, tableau des jours");
 
   // Version et mise à jour.
   const version = (await page.textContent("#version")).trim();

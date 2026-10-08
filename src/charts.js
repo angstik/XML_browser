@@ -1,6 +1,6 @@
 // Graphes par jour : deux graphes à barres groupées (dispense, refund), une mesure par graphe.
 // Deux mesures d'échelles différentes = deux graphes, jamais un double axe.
-// Exposé en global : window.DayCharts.render(root, { days, charts, series, fmtDate })
+// Exposé en global : window.DayCharts.render(root, { days, charts, series, fmtDate, title, fileName })
 (function () {
   "use strict";
 
@@ -20,7 +20,7 @@
 
   // Échelle « ronde » : au plus 5 graduations, pas de 1 / 2 / 5 (ou 2,5 pour les montants).
   function niceScale(max, integer) {
-    if (!(max > 0)) return { max: integer ? 1 : 1, step: 1 };
+    if (!(max > 0)) return { max: 1, step: 1 };
     const rough = max / 4;
     const pow = Math.pow(10, Math.floor(Math.log10(rough)));
     const f = rough / pow;
@@ -38,26 +38,64 @@
     return svg("path", { d, class: cls });
   }
 
-  const M = { left: 60, right: 16, top: 20, bottom: 28, plot: 150 };
+  // ---- Axe du temps -------------------------------------------------------
+  const ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
+  const DAY = 86400000;
+  const MAX_FILL = 1100;                       // au-delà (environ 3 ans), on ne comble plus les jours vides
+  const monthFmt = new Intl.DateTimeFormat("fr-FR", { month: "short", year: "numeric", timeZone: "UTC" });
+  const toUtc = (iso) => { const m = ISO.exec(iso); return Date.UTC(+m[1], +m[2] - 1, +m[3]); };
+  const toIso = (t) => new Date(t).toISOString().slice(0, 10);
 
-  function drawChart(host, days, chart, series, width, hover, fmtDate) {
-    const n = days.length;
-    const slot = Math.min(140, Math.max(26, (width - M.left - M.right) / Math.max(1, n)));
-    const w = Math.max(width, M.left + n * slot + M.right);
+  // Axe continu : chaque jour du calendrier entre le premier et le dernier a sa place,
+  // même sans donnée. Les entrées sans date valide sont placées à la fin.
+  function timeline(days) {
+    const dated = days.filter((d) => ISO.test(d.date)).sort((a, b) => (a.date < b.date ? -1 : 1));
+    const other = days.filter((d) => !ISO.test(d.date));
+    if (dated.length < 2) return dated.concat(other);
+    const first = toUtc(dated[0].date), last = toUtc(dated[dated.length - 1].date);
+    if ((last - first) / DAY > MAX_FILL) return dated.concat(other);
+    const byDate = new Map(dated.map((d) => [d.date, d]));
+    const out = [];
+    for (let t = first; t <= last; t += DAY) {
+      const iso = toIso(t);
+      out.push(byDate.get(iso) || { date: iso, empty: true });
+    }
+    return out.concat(other);
+  }
+
+  // Début de mois : le 1er, ou à défaut le premier jour affiché d'un nouveau mois.
+  function monthStart(slots, i) {
+    const d = slots[i].date;
+    if (!ISO.test(d)) return null;
+    const prev = i > 0 ? slots[i - 1].date : null;
+    const starts = d.slice(8) === "01" || (prev !== null && ISO.test(prev) && prev.slice(0, 7) !== d.slice(0, 7));
+    return starts ? monthFmt.format(new Date(toUtc(d.slice(0, 8) + "01"))) : null;
+  }
+
+  const M = { left: 60, right: 16, top: 34, bottom: 28, plot: 150 };
+
+  // Un graphe = un axe vertical fixe + une zone de tracé qui défile horizontalement.
+  function drawChart(host, slots, chart, series, width, hover, fmtDate) {
+    const n = slots.length;
+    const avail = Math.max(120, width - M.left);
+    const slot = Math.max(26, (avail - M.right) / Math.max(1, n));      // toute la largeur disponible
+    const w = Math.max(avail, n * slot + M.right);
     const h = M.top + M.plot + M.bottom;
     const y0 = M.top + M.plot;
-    const root = svg("svg", { width: w, height: h, viewBox: "0 0 " + w + " " + h, role: "img", "aria-label": chart.title });
 
     let max = 0;
-    for (const d of days) for (const s of series) max = Math.max(max, d[chart.keys[s.id]]);
+    for (const d of slots) for (const s of series) max = Math.max(max, d[chart.keys[s.id]] || 0);
     const scale = niceScale(max, chart.integer);
     const y = (v) => y0 - (v / scale.max) * M.plot;
+
+    const axis = svg("svg", { width: M.left, height: h, viewBox: "0 0 " + M.left + " " + h, "aria-hidden": "true" });
+    const plot = svg("svg", { width: w, height: h, viewBox: "0 0 " + w + " " + h, role: "img", "aria-label": chart.title });
 
     // Grille et graduations : traits fins et pleins, en retrait.
     for (let v = 0; v <= scale.max + 1e-9; v += scale.step) {
       const yy = Math.round(y(v)) + 0.5;
-      root.appendChild(svg("line", { x1: M.left, x2: w - M.right, y1: yy, y2: yy, class: v === 0 ? "viz-axis" : "viz-grid" }));
-      root.appendChild(svg("text", { x: M.left - 8, y: yy + 4, class: "viz-tick", "text-anchor": "end" }, chart.fmtTick(v)));
+      plot.appendChild(svg("line", { x1: 0, x2: w - M.right, y1: yy, y2: yy, class: v === 0 ? "viz-axis" : "viz-grid" }));
+      axis.appendChild(svg("text", { x: M.left - 8, y: yy + 4, class: "viz-tick", "text-anchor": "end" }, chart.fmtTick(v)));
     }
 
     const pad = Math.max(8, slot * 0.28);
@@ -66,21 +104,30 @@
     const every = Math.max(1, Math.ceil(48 / slot));
     const bars = [], bands = [];
 
-    days.forEach((d, i) => {
-      const sx = M.left + i * slot;
+    slots.forEach((d, i) => {
+      const sx = i * slot;
       const band = svg("rect", { x: sx, y: M.top - 6, width: slot, height: M.plot + 6, class: "viz-band" });
-      root.appendChild(band);
+      plot.appendChild(band);
       bands.push(band);
+
+      // Trait vertical au 1er du mois à 0 h : bord gauche de la case du 1er.
+      const month = monthStart(slots, i);
+      if (month) {
+        const mx = Math.round(sx) + 0.5;
+        plot.appendChild(svg("line", { x1: mx, x2: mx, y1: 4, y2: y0, class: "viz-month" }));
+        plot.appendChild(svg("text", { x: mx + 5, y: 14, class: "viz-month-label" }, month));
+      }
+
       series.forEach((s, k) => {
         const v = d[chart.keys[s.id]];
         if (!(v > 0)) return;
         const bx = sx + (slot - group) / 2 + k * (bw + 2);
         const by = Math.min(y(v), y0 - 1);        // une valeur non nulle reste visible
-        root.appendChild(column(bx, by, bw, y0, "viz-bar " + s.cls));
+        plot.appendChild(column(bx, by, bw, y0, "viz-bar " + s.cls));
         bars.push({ i, k, x: bx, y: by, w: bw, v });
       });
       if (i % every === 0) {
-        root.appendChild(svg("text", { x: sx + slot / 2, y: y0 + 17, class: "viz-tick", "text-anchor": "middle" }, fmtDate(d.date, true)));
+        plot.appendChild(svg("text", { x: sx + slot / 2, y: y0 + 17, class: "viz-tick", "text-anchor": "middle" }, fmtDate(d.date, true)));
       }
     });
 
@@ -93,32 +140,113 @@
       const text = chart.fmtValue(best.v);
       const tw = text.length * 6.4 + 4;
       const box = { x1: best.x + best.w / 2 - tw / 2, x2: best.x + best.w / 2 + tw / 2, y1: best.y - 18, y2: best.y - 3 };
-      if (box.x1 < M.left || box.x2 > w - 2 || box.y1 < 2) return;
+      if (box.x1 < 0 || box.x2 > w - 2 || box.y1 < 16) return;
       const hitBar = bars.some((b) => b !== best && b.x < box.x2 && b.x + b.w > box.x1 && b.y < box.y2);
       const hitLabel = placed.some((p) => p.x1 < box.x2 && p.x2 > box.x1 && p.y1 < box.y2 && p.y2 > box.y1);
       if (hitBar || hitLabel) return;
       placed.push(box);
-      root.appendChild(svg("text", { x: best.x + best.w / 2, y: best.y - 6, class: "viz-label", "text-anchor": "middle" }, text));
+      plot.appendChild(svg("text", { x: best.x + best.w / 2, y: best.y - 6, class: "viz-label", "text-anchor": "middle" }, text));
     });
 
     // Zones de survol : toute la colonne du jour, bien plus large que les barres.
-    days.forEach((d, i) => {
-      const hit = svg("rect", { x: M.left + i * slot, y: 0, width: slot, height: h, class: "viz-hit" });
+    slots.forEach((d, i) => {
+      const hit = svg("rect", { x: i * slot, y: 0, width: slot, height: h, class: "viz-hit" });
       hit.addEventListener("pointerenter", (e) => hover(i, e));
       hit.addEventListener("pointermove", (e) => hover(i, e));
       hit.addEventListener("pointerleave", () => hover(-1));
-      root.appendChild(hit);
+      plot.appendChild(hit);
     });
 
     const fig = el("div", "viz-chart");
     fig.appendChild(el("h3", "viz-title", chart.title));
+    const row = el("div", "viz-row");
     const scroller = el("div", "viz-scroll");
-    scroller.appendChild(root);
-    fig.appendChild(scroller);
+    row.appendChild(axis);
+    scroller.appendChild(plot);
+    row.appendChild(scroller);
+    fig.appendChild(row);
     host.appendChild(fig);
-    return bands;
+    return { bands, scroller, axis, plot, title: chart.title, height: h, width: w };
   }
 
+  // ---- Export en image ----------------------------------------------------
+  const STYLE_PROPS = ["fill", "stroke", "stroke-width", "font-family", "font-size", "font-weight"];
+
+  // Copie d'un SVG avec ses styles calculés écrits en attributs : il reste lisible hors de la page.
+  function standalone(source) {
+    const clone = source.cloneNode(true);
+    const a = [source, ...source.querySelectorAll("*")], b = [clone, ...clone.querySelectorAll("*")];
+    a.forEach((node, i) => {
+      const cs = getComputedStyle(node);
+      for (const p of STYLE_PROPS) b[i].setAttribute(p, cs.getPropertyValue(p));
+    });
+    clone.querySelectorAll(".viz-hit, .viz-band").forEach((n) => n.remove());
+    return clone;
+  }
+
+  // Assemble titre, légende et graphes dans un seul SVG, sur fond clair, puis le convertit en PNG.
+  function exportImage(root, drawn, series, title, fileName) {
+    root.classList.add("viz-export");            // couleurs du thème clair le temps de la copie
+    const P = 20;
+    let font, ink, muted, parts, swatches;
+    try {
+      const cs = getComputedStyle(root);
+      font = cs.fontFamily; ink = cs.getPropertyValue("--ink").trim(); muted = cs.getPropertyValue("--muted").trim();
+      swatches = series.map((s) => getComputedStyle(root.querySelector(".viz-key i." + s.cls)).backgroundColor);
+      parts = drawn.map((d) => ({ d, axis: standalone(d.axis), plot: standalone(d.plot) }));
+    } finally {
+      root.classList.remove("viz-export");
+    }
+    const W = P + Math.max(...drawn.map((d) => 60 + d.width)) + P;
+    let y = P + 18;
+    const out = svg("svg", { xmlns: NS, width: W, viewBox: "0 0 " + W + " 0" });
+    const text = (t, x, yy, size, weight, color) => out.appendChild(svg("text", { x, y: yy, "font-family": font, "font-size": size, "font-weight": weight, fill: color }, t));
+    text(title, P, y, 16, 650, ink);
+    y += 26;
+    let x = P;
+    series.forEach((s, i) => {
+      out.appendChild(svg("rect", { x, y: y - 10, width: 10, height: 10, rx: 2, fill: swatches[i] }));
+      text(s.label, x + 16, y, 13, 400, ink);
+      x += 16 + s.label.length * 7.5 + 22;
+    });
+    y += 18;
+    for (const p of parts) {
+      text(p.d.title, P, y + 12, 13, 600, muted);
+      y += 18;
+      p.axis.setAttribute("x", P); p.axis.setAttribute("y", y);
+      p.plot.setAttribute("x", P + 60); p.plot.setAttribute("y", y);
+      out.appendChild(p.axis); out.appendChild(p.plot);
+      y += p.d.height + 10;
+    }
+    const H = y + P - 10;
+    out.setAttribute("height", H);
+    out.setAttribute("viewBox", "0 0 " + W + " " + H);
+    out.insertBefore(svg("rect", { x: 0, y: 0, width: W, height: H, fill: "#ffffff" }), out.firstChild);
+
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        // Double définition pour la netteté, dans la limite de taille des images du navigateur.
+        const scale = Math.max(0.5, Math.min(2, 16000 / W, 16000 / H));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(W * scale); canvas.height = Math.round(H * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (!blob) { reject(new Error("image trop grande pour ce navigateur")); return; }
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = fileName;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+          resolve({ width: canvas.width, height: canvas.height });
+        }, "image/png");
+      };
+      img.onerror = () => reject(new Error("conversion en image impossible"));
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(out));
+    });
+  }
+
+  // ---- Rendu --------------------------------------------------------------
   function render(root, cfg) {
     const { days, charts, series, fmtDate } = cfg;
     root.textContent = "";
@@ -134,17 +262,22 @@
       legend.appendChild(item);
     }
     head.appendChild(legend);
-    const toggle = el("button", null, "Afficher le tableau des jours");
+    const exportBtn = el("button", "viz-export-btn", "Exporter en image");
+    exportBtn.type = "button";
+    exportBtn.title = "Image PNG des deux graphes, sur toute leur longueur";
+    head.appendChild(exportBtn);
+    const toggle = el("button", "viz-toggle", "Afficher le tableau des jours");
     toggle.type = "button";
     head.appendChild(toggle);
     root.appendChild(head);
 
     if (!days.length) {
       root.appendChild(el("p", "viz-empty", "Aucun jour à afficher."));
-      toggle.hidden = true;
+      toggle.hidden = true; exportBtn.hidden = true;
       return;
     }
 
+    const slots = timeline(days);
     const plots = el("div", "viz-plots");
     const tip = el("div", "viz-tip");
     tip.hidden = true;
@@ -152,11 +285,11 @@
     root.appendChild(tip);
 
     // Une seule infobulle pour les deux graphes : les quatre valeurs du jour survolé.
-    let allBands = [];
+    let drawn = [];
     function hover(i, e) {
-      allBands.forEach((bands) => bands.forEach((b, k) => b.classList.toggle("on", k === i)));
+      drawn.forEach((d) => d.bands.forEach((b, k) => b.classList.toggle("on", k === i)));
       if (i < 0) { tip.hidden = true; return; }
-      const d = days[i];
+      const d = slots[i];
       tip.textContent = "";
       tip.appendChild(el("div", "viz-tip-date", fmtDate(d.date, false)));
       const grid = el("div", "viz-tip-grid");
@@ -167,7 +300,7 @@
         name.appendChild(el("i", s.cls));
         name.appendChild(document.createTextNode(s.label));
         grid.appendChild(name);
-        for (const c of charts) grid.appendChild(el("b", null, c.fmtValue(d[c.keys[s.id]])));
+        for (const c of charts) grid.appendChild(el("b", null, c.fmtValue(d[c.keys[s.id]] || 0)));
       }
       tip.appendChild(grid);
       tip.hidden = false;
@@ -184,8 +317,16 @@
       const width = Math.floor(plots.clientWidth);
       if (!width || width === lastWidth) return;
       lastWidth = width;
+      const left = drawn.length ? drawn[0].scroller.scrollLeft : 0;
       plots.textContent = "";
-      allBands = charts.map((c) => drawChart(plots, days, c, series, width, hover, fmtDate));
+      drawn = charts.map((c) => drawChart(plots, slots, c, series, width, hover, fmtDate));
+      // Défilement horizontal commun : faire défiler un graphe entraîne l'autre.
+      for (const d of drawn) {
+        d.scroller.scrollLeft = left;
+        d.scroller.addEventListener("scroll", () => {
+          for (const o of drawn) if (o !== d && o.scroller.scrollLeft !== d.scroller.scrollLeft) o.scroller.scrollLeft = d.scroller.scrollLeft;
+        });
+      }
     }
     draw();
     if (window.ResizeObserver) {
@@ -193,7 +334,7 @@
       root._vizObserver.observe(plots);
     }
 
-    // Vue tableau : toutes les valeurs des graphes, lisibles sans survol.
+    // Vue tableau : toutes les valeurs des graphes, lisibles sans survol (jours avec données seulement).
     const tableWrap = el("div", "viz-table");
     tableWrap.hidden = true;
     const table = el("table");
@@ -203,7 +344,8 @@
     thead.appendChild(trh); table.appendChild(thead);
     const tbody = el("tbody");
     const sum = {};
-    for (const d of days) {
+    for (const d of slots) {
+      if (d.empty) continue;
       const tr = el("tr");
       tr.appendChild(el("td", null, fmtDate(d.date, false)));
       for (const s of series) for (const c of charts) {
@@ -222,15 +364,24 @@
     root.appendChild(tableWrap);
 
     // Le choix graphes / tableau est conservé quand on change de client.
-    function show(table) {
-      root.dataset.view = table ? "table" : "plots";
-      tableWrap.hidden = !table;
-      plots.hidden = table;
-      toggle.textContent = table ? "Afficher les graphes" : "Afficher le tableau des jours";
-      if (!table) { lastWidth = -1; draw(); }
+    function show(asTable) {
+      root.dataset.view = asTable ? "table" : "plots";
+      tableWrap.hidden = !asTable;
+      plots.hidden = asTable;
+      exportBtn.hidden = asTable;
+      toggle.textContent = asTable ? "Afficher les graphes" : "Afficher le tableau des jours";
+      if (!asTable) { lastWidth = -1; draw(); }
     }
     toggle.addEventListener("click", () => show(tableWrap.hidden));
     if (root.dataset.view === "table") show(true);
+
+    exportBtn.addEventListener("click", () => {
+      exportBtn.disabled = true;
+      exportImage(root, drawn, series, cfg.title || "", cfg.fileName || "graphes.png")
+        .then((size) => { if (cfg.onExport) cfg.onExport(null, size); })
+        .catch((err) => { if (cfg.onExport) cfg.onExport(err); })
+        .then(() => { exportBtn.disabled = false; });
+    });
   }
 
   window.DayCharts = { render };
