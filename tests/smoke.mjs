@@ -7,6 +7,8 @@ import { join } from "node:path";
 import assert from "node:assert/strict";
 import { startServer } from "./serve.mjs";
 import { makeRar } from "./make-rar.mjs";
+import { makeZip, makeTar } from "./make-archives.mjs";
+import { gzipSync } from "node:zlib";
 
 const rec = (tag, id, date, amount, tva = 0) => `
       <${tag}><PTxID>${id}</PTxID><TotalAmount>${amount.toFixed(2)}</TotalAmount>
@@ -31,7 +33,14 @@ writeFileSync(join(lot, "b.xml"), doc(block("AAA", "K1", [rec(D, "b1", "2026-01-
 writeFileSync(join(lot, "notes.txt"), "pas du xml");
 // c.rar : archive contenant un fichier à deux dates pour le client BBB.
 const inner = doc(block("BBB", "K2", [rec(D, "c1", "2026-01-02", 5), rec(D, "c2", "2026-01-03", 5)], [rec(R, "c3", "2026-01-03", 5)]));
-writeFileSync(join(lot, "c.rar"), makeRar([{ name: "interne/c.xml", data: new TextEncoder().encode(inner) }]));
+const innerFile = [{ name: "interne/c.xml", data: new TextEncoder().encode(inner) }];
+writeFileSync(join(lot, "c.rar"), makeRar(innerFile));
+// Les mêmes données dans les autres formats d'archive, hors du répertoire « lot ».
+const archives = ["c.zip", "c_stocke.zip", "c.tar", "c.tar.gz"].map((n) => join(dir, n));
+writeFileSync(archives[0], makeZip(innerFile));
+writeFileSync(archives[1], makeZip(innerFile, { store: true }));
+writeFileSync(archives[2], makeTar(innerFile));
+writeFileSync(archives[3], gzipSync(makeTar(innerFile)));
 
 const dist = new URL("../dist/", import.meta.url).pathname;
 const { server, url } = await startServer(dist);
@@ -128,10 +137,29 @@ try {
   await page.waitForFunction(() => /dernière version/.test(document.getElementById("toastText").textContent));
   step("version affichée (" + version + ") et vérification de mise à jour");
 
+  // Archives ZIP (compressée et stockée), TAR et TAR.GZ : mêmes lignes que depuis le RAR.
+  await page.setInputFiles("#archiveInput", archives);
+  await page.waitForSelector("#tbody tr:nth-child(8)");
+  await page.waitForSelector("#progress", { state: "hidden" });
+  const fromArchives = await cells("#tbody tr");
+  assert.equal(fromArchives.length, 8, "4 archives × 2 dates");
+  assert.deepEqual(fromArchives.filter((_, i) => i % 2 === 0).map((r) => r[0]).sort(),
+    ["c.tar.gz/interne/c.xml2 dates", "c.tar/interne/c.xml2 dates", "c.zip/interne/c.xml2 dates", "c_stocke.zip/interne/c.xml2 dates"].sort());
+  for (const r of fromArchives.filter((_, i) => i % 2 === 1)) assert.deepEqual(r.slice(1, 4), ["BBB (K2)", "2026-01-03", "2026-01-03"]);
+  assert.deepEqual(await page.$$eval("#ignoredList li", (l) => l.length), 0);
+  await page.focus("#tableWrap");
+  await page.keyboard.press("Home");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => /Ligne/.test(document.getElementById("statusPos").textContent));
+  assert.match(await page.textContent(".cm-content"), /ReconcilePayLoad/);
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("#viewer", { state: "hidden" });
+  step("archives ZIP, TAR et TAR.GZ");
+
   // Hors ligne : l'application se recharge depuis le cache et lit toujours les RAR.
   await context.setOffline(true);
   await page.reload();
-  await page.setInputFiles("#rarInput", join(lot, "c.rar"));
+  await page.setInputFiles("#archiveInput", join(lot, "c.rar"));
   await page.waitForSelector("#tbody tr");
   assert.equal((await cells("#tbody tr")).length, 2);
   await page.click("#version");

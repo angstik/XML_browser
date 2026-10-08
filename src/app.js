@@ -112,6 +112,19 @@
     return "archive RAR illisible (" + r + ")";
   }
 
+  // Type d'archive, d'après les premiers octets du fichier et son nom.
+  // ZIP et GZIP servent de conteneur à bien d'autres formats (docx, xlsx...) : l'extension est exigée.
+  function archiveKind(name, head) {
+    const n = name.toLowerCase();
+    if (isRar(head)) return "rar";
+    if (head[0] === 0x50 && head[1] === 0x4b && (head[2] === 3 || head[2] === 5) && /\.zip$/.test(n)) return "zip";
+    if (head[0] === 0x1f && head[1] === 0x8b && /\.(gz|tgz)$/.test(n)) return "gz";
+    if (window.Archives.isTar(head) && (/\.tar$/.test(n) || (head[257] === 0x75 && head[258] === 0x73 && head[259] === 0x74 && head[260] === 0x61 && head[261] === 0x72))) return "tar";
+    return null;
+  }
+  const KIND_LABEL = { rar: "RAR", zip: "ZIP", tar: "TAR", gz: "GZIP" };
+  const archiveReader = (kind) => (kind === "rar" ? rarReader() : Promise.resolve(window.Archives[kind]));
+
   async function bytesOf(entry) {
     if (entry.getBytes) return entry.getBytes();
     return new Uint8Array(await (await entry.getFile()).arrayBuffer());
@@ -323,32 +336,33 @@
       files.push({ entry, res, color: -1 });
     }
 
-    // Une archive RAR se comporte comme un répertoire : chaque fichier qu'elle contient est analysé.
-    async function ingestRar(archive, file, i) {
-      let rar;
-      try { rar = await rarReader(); }
-      catch (e) { ignored.push({ path: archive.path, reason: "lecture RAR indisponible (" + errText(e) + ")" }); return; }
+    // Une archive (RAR, ZIP, TAR, GZIP) se comporte comme un répertoire :
+    // chaque fichier qu'elle contient est analysé.
+    async function ingestArchive(kind, archive, file, i) {
+      let reader;
+      try { reader = await archiveReader(kind); }
+      catch (e) { ignored.push({ path: archive.path, reason: "lecture " + KIND_LABEL[kind] + " indisponible (" + errText(e) + ")" }); return; }
       let n = 0;
       try {
         const buffer = await file.arrayBuffer();
-        await rar.each(buffer, async (f) => {
+        await reader.each(buffer, async (f) => {
           if (gen !== state.gen) return;
           n++;
           const entry = {
             path: archive.path + "/" + f.name, name: f.name.split("/").pop(), depth: archive.depth,
-            getBytes: async () => (await rarReader()).one(await (await archive.getFile()).arrayBuffer(), f.rawName),
+            getBytes: async () => (await archiveReader(kind)).one(await (await archive.getFile()).arrayBuffer(), f.rawName),
           };
           progress(i, "Archive " + archive.path + " : " + f.name);
-          if (!f.bytes) ignored.push({ path: entry.path, reason: "non extrait de l'archive" });
+          if (!f.bytes) ignored.push({ path: entry.path, reason: f.error ? "non extrait (" + errText(f.error) + ")" : "non extrait de l'archive" });
           else {
             try { ingest(entry, f.bytes); }
             catch (e) { ignored.push({ path: entry.path, reason: "lecture impossible (" + errText(e) + ")" }); }
           }
           await tick();
-        });
+        }, archive.name);
         if (!n) ignored.push({ path: archive.path, reason: "archive vide" });
       } catch (e) {
-        ignored.push({ path: archive.path, reason: rarReason(e) });
+        ignored.push({ path: archive.path, reason: kind === "rar" ? rarReason(e) : "archive " + KIND_LABEL[kind] + " illisible (" + errText(e) + ")" });
       }
     }
 
@@ -359,8 +373,9 @@
       progress(i, "Lecture " + (i + 1) + " / " + entries.length + " : " + e.path);
       try {
         const file = await e.getFile();
-        const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
-        if (isRar(head)) await ingestRar(e, file, i);
+        const head = new Uint8Array(await file.slice(0, 512).arrayBuffer());
+        const kind = archiveKind(e.name, head);
+        if (kind) await ingestArchive(kind, e, file, i);
         else ingest(e, new Uint8Array(await file.arrayBuffer()));
       } catch (err) {
         ignored.push({ path: e.path, reason: "lecture impossible (" + errText(err) + ")" });
@@ -644,10 +659,14 @@
       const tr = el("tr", r.dup ? "dup dc" + r.color : "");
       tr.dataset.i = i;
       for (const c of COLS) {
-        const td = el("td", "t-" + c.type + " c-" + c.key, c.key === "path" ? displayName(r.path) : cellText(c, r));
+        const td = el("td", "t-" + c.type + " c-" + c.key, c.key === "path" ? "" : cellText(c, r));
         if (c.key === "path") {
+          // Le nom se tronque, les étiquettes de doublon restent toujours visibles.
           td.classList.add("file"); td.title = r.path;
-          if (r.dup) for (const t of dupTags(r)) td.appendChild(el("span", "tag", t));
+          const wrap = el("span", "fwrap");
+          wrap.appendChild(el("span", "fname", displayName(r.path)));
+          if (r.dup) for (const t of dupTags(r)) wrap.appendChild(el("span", "tag", t));
+          td.appendChild(wrap);
         } else if (c.type === "check") {
           td.classList.add("chk-" + r.check.state); td.title = r.check.details.join("\n");
         } else if ((c.type === "int" || c.type === "money") && r[c.key] === 0) {
@@ -756,8 +775,10 @@
         },
       });
     }
+    viewer.open("", {});                       // on n'affiche pas le fichier précédent pendant la lecture
     $("statusPath").textContent = "Lecture du fichier…";
     $("statusPos").textContent = "";
+    $("statusNote").textContent = "";
     try {
       let text = decode(await bytesOf(r.entry));
       if (state.open !== r) return;
@@ -1050,8 +1071,8 @@
 
   // ---- Événements ---------------------------------------------------------
   $("pick").addEventListener("click", pick);
-  $("pickRar").addEventListener("click", () => { $("rarInput").value = ""; $("rarInput").click(); });
-  for (const id of ["dirInput", "rarInput"]) {
+  $("pickArchive").addEventListener("click", () => { $("archiveInput").value = ""; $("archiveInput").click(); });
+  for (const id of ["dirInput", "archiveInput"]) {
     $(id).addEventListener("change", async (e) => {
       if (!e.target.files.length) return;
       state.source = entriesFromInput(e.target.files);
@@ -1097,6 +1118,13 @@
     // On laisse la frappe aux champs de saisie ; une case à cocher ne bloque pas les raccourcis.
     if (tag === "TEXTAREA" || tag === "SELECT" || (tag === "INPUT" && e.target.type !== "checkbox")) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    // Visionneuse : Échap revient au tableau, même pendant la lecture du fichier.
+    // Dans l'éditeur, c'est lui qui traite la touche (fermeture de la recherche, puis retour).
+    if (!$("viewer").hidden) {
+      if (e.key === "Escape" && !e.defaultPrevented && !e.target.closest(".cm-editor")) { e.preventDefault(); closeViewer(); }
+      return;
+    }
 
     // Écran de synthèse
     if (!$("synthScreen").hidden) {
@@ -1159,10 +1187,6 @@
     b.addEventListener("click", () => { viewer.foldDepth(n); viewer.focus(); });
     $("vLevels").appendChild(b);
   }
-  // Échap hors de l'éditeur (focus sur un bouton de la visionneuse)
-  $("viewer").addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !e.defaultPrevented && !e.target.closest(".cm-editor")) closeViewer();
-  });
 
   // Glisser-déposer d'un répertoire ou d'archives
   let dragDepth = 0;

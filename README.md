@@ -8,8 +8,9 @@ Application en ligne : <https://angstik.github.io/XML_browser/>
 
 ## Ce que fait l'application
 
-- **Sources** : un répertoire (avec ou sans sous-répertoires), une ou plusieurs archives RAR,
-  ou un glisser-déposer. Une archive RAR trouvée dans un répertoire est lue comme un répertoire.
+- **Sources** : un répertoire (avec ou sans sous-répertoires), une ou plusieurs archives
+  (RAR, ZIP, TAR, TAR.GZ), ou un glisser-déposer. Une archive trouvée dans un répertoire est
+  lue comme un répertoire. Un fichier `.gz` seul est lu comme le fichier qu'il contient.
 - **Tableau** : une ligne par fichier, client et date. Colonnes : client
   (`PaymentAccountNumber (PartnerID)`), date dispense, date refund, date fichier, flux, items,
   TTC, TVA, HT, refunds, net, contrôle avec le trailer.
@@ -64,6 +65,7 @@ Avant le premier `npm test` : `npx playwright install chromium`.
 | `src/app.js` | lecture des sources, analyse, tableau, sélections, synthèse, version |
 | `src/viewer.js` | visionneuse XML (CodeMirror 6) |
 | `src/charts.js` | graphes par jour en SVG |
+| `src/archives.js` | lecture des archives ZIP, TAR et GZIP, sans bibliothèque |
 | `src/rar.js` | lecture des archives RAR (node-unrar-js, WebAssembly) |
 | `src/sw.js` | service worker : cache hors ligne par version |
 | `build.mjs` | assemblage de `dist/` |
