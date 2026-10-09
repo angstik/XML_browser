@@ -33,7 +33,7 @@ writeFileSync(join(lot, "b.xml"), doc(block("AAA", "K1", [rec(D, "b1", "2026-01-
 writeFileSync(join(lot, "notes.txt"), "pas du xml");
 // c.rar : archive contenant un fichier à deux dates pour le client BBB.
 const inner = doc(block("BBB", "K2", [rec(D, "c1", "2026-01-02", 5), rec(D, "c2", "2026-01-03", 5)], [rec(R, "c3", "2026-01-03", 5)]));
-const innerFile = [{ name: "interne/c.xml", data: new TextEncoder().encode(inner) }];
+const innerFile = [{ name: "interne/archive_c.xml", data: new TextEncoder().encode(inner) }];
 writeFileSync(join(lot, "c.rar"), makeRar(innerFile));
 // Les mêmes données dans les autres formats d'archive, hors du répertoire « lot ».
 const archives = ["c.zip", "c_stocke.zip", "c.tar", "c.tar.gz"].map((n) => join(dir, n));
@@ -45,7 +45,7 @@ writeFileSync(archives[3], gzipSync(makeTar(innerFile)));
 const dist = new URL("../dist/", import.meta.url).pathname;
 const { server, url } = await startServer(dist);
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
-const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, permissions: ["clipboard-read", "clipboard-write"] });
 const page = await context.newPage();
 page.setDefaultTimeout(20000);
 const problems = [];
@@ -73,7 +73,7 @@ try {
   assert.equal(rows[0][13], "OK");
   assert.ok(rows[1][0].startsWith("b.xml") && rows[1][0].includes("2 clients"));
   assert.deepEqual([rows[1][1], rows[2][1]], ["AAA (K1)", "BBB (K2)"]);
-  assert.ok(rows[3][0].startsWith("c.rar/interne/c.xml") && rows[3][0].includes("2 dates"));
+  assert.ok(rows[3][0].startsWith("c.rar/interne/archive_c.xml") && rows[3][0].includes("2 dates"));
   assert.deepEqual([rows[3][2], rows[3][3], rows[4][2], rows[4][3]], ["2026-01-02", "", "2026-01-03", "2026-01-03"]);
   const total = (await cells("#tfoot tr"))[0];
   assert.deepEqual([total[0], total[1], total[5], total[7]], ["Total : 4 fichiers", "2 clients", "8", "96,00"]);
@@ -82,7 +82,7 @@ try {
 
   // Noms courts.
   await page.check("#shortNames");
-  assert.equal((await cells("#tbody tr"))[3][0], "c.xml2 dates");
+  assert.equal((await cells("#tbody tr"))[3][0], "…c.xml2 dates", "les 5 derniers caractères du nom");
   assert.equal((await cells("#tbody tr"))[0][0], "a.xml");
   await page.uncheck("#shortNames");
   step("noms courts");
@@ -95,12 +95,39 @@ try {
   await page.click("#selClear");
   step("sélection par client");
 
+  // Période : bornes min et max, puis mois complet.
+  await page.fill("#dateMin", "2026-01-02");
+  await page.fill("#dateMax", "2026-01-03");
+  await page.dispatchEvent("#dateMax", "change");
+  assert.deepEqual((await cells("#tbody tr")).map((r) => r[2] || r[3]), ["2026-01-02", "2026-01-02", "2026-01-02", "2026-01-03"]);
+  assert.match(await page.textContent("#synth"), /Fichiers3.*Dates2.*Flux5/);
+  // Noms des fichiers affichés, dans le presse-papiers.
+  await page.click("#copyNames");
+  await page.waitForFunction(() => /copiés/.test(document.getElementById("toastText").textContent));
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "b.xml,archive_c.xml");
+  assert.deepEqual(await page.$$eval("#selMonth option", (o) => o.map((x) => x.value)), ["", "2026-01"]);
+  await page.selectOption("#selMonth", "2026-01");
+  assert.deepEqual([await page.inputValue("#dateMin"), await page.inputValue("#dateMax")], ["2026-01-01", "2026-01-31"]);
+  assert.equal((await cells("#tbody tr")).length, 5);
+  // La synthèse suit la période.
+  await page.fill("#dateMin", "2026-01-03");
+  await page.dispatchEvent("#dateMin", "change");
+  await page.focus("#tableWrap");
+  await page.keyboard.press("s");
+  await page.waitForSelector("#viz svg");
+  assert.match(await page.textContent("#sScope"), /1 fichier, du 2026-01-03 au 2026-01-31/);
+  assert.deepEqual((await cells("#sBody tr")).map((r) => r[0]), ["Tous les clients", "BBB (K2)"]);
+  await page.keyboard.press("Escape");
+  await page.click("#selClear");
+  assert.equal((await cells("#tbody tr")).length, 5);
+  step("période min/max, mois complet, copie des noms de fichier");
+
   // Visionneuse sur un fichier extrait de l'archive.
   await page.focus("#tableWrap");
   await page.keyboard.press("End");
   await page.keyboard.press("Enter");
   await page.waitForSelector(".cm-foldPlaceholder");
-  assert.match(await page.textContent("#summary"), /c\.rar\/interne\/c\.xml.*BBB \(K2\).*2026-01-03/);
+  assert.match(await page.textContent("#summary"), /c\.rar\/interne\/archive_c\.xml.*BBB \(K2\).*2026-01-03/);
   assert.match(await page.textContent(".cm-content"), /ReconcilePayLoad/);
   await page.keyboard.press("Escape");
   await page.waitForSelector("#viewer", { state: "hidden" });
@@ -113,27 +140,22 @@ try {
   assert.deepEqual(synth.map((r) => r[0]), ["Tous les clients", "AAA (K1)", "BBB (K2)"]);
   // Tous : 8 flux ; HT = 96 − 6 = 90 ; refunds HT = (12 − 2) + 5 = 15 ; net HT = 75.
   assert.deepEqual([synth[0][1], synth[0][2], synth[0][3], synth[0][4], synth[0][8], synth[0][10]], ["4", "3", "8", "90,00", "15,00", "75,00"]);
-  assert.equal(await page.$$eval("#viz .viz-chart", (s) => s.length), 2, "deux graphes : nombre et valeur HT");
-  // Le 1er janvier ouvre l'axe : un trait de début de mois par graphe, avec son libellé.
-  assert.deepEqual(await page.$$eval("#viz .viz-month-label", (t) => t.map((x) => x.textContent)), ["janv. 2026", "janv. 2026"]);
-  // Les deux graphes défilent ensemble.
-  const lefts = await page.evaluate(async () => {
-    const [a, b] = document.querySelectorAll("#viz .viz-scroll");
-    a.firstElementChild.style.minWidth = b.firstElementChild.style.minWidth = "5000px";   // force le défilement
-    a.scrollLeft = 300;
-    await new Promise((r) => setTimeout(r, 100));
-    const out = [a.scrollLeft, b.scrollLeft];
-    a.scrollLeft = 0;
-    return out;
-  });
-  assert.deepEqual(lefts, [300, 300], "défilement synchronisé");
+  // Un seul graphe : montants en barres (axe de gauche), volumes en courbes (axe de droite).
+  assert.equal(await page.$$eval("#viz .viz-row", (r) => r.length), 1);
+  assert.deepEqual(await page.$$eval("#viz .viz-axis-title", (t) => t.map((x) => x.textContent)), ["Valeur HT (€) : barres", "Nombre : courbes"]);
+  assert.equal(await page.$$eval("#viz .viz-bar", (b) => b.length), 5, "barres : 3 jours de dispense + 2 jours de refund");
+  assert.equal(await page.$$eval("#viz .viz-line", (l) => l.length), 2, "une courbe par série");
+  assert.equal(await page.$$eval("#viz .viz-dot", (d) => d.length), 6, "3 jours × 2 séries");
+  assert.deepEqual(await page.$$eval("#viz .viz-key", (k) => k.map((x) => x.textContent)),
+    ["Dispense, valeur HT", "Refund, valeur HT", "Dispense, nombre", "Refund, nombre"]);
+  // Le 1er janvier ouvre l'axe : un trait de début de mois, avec son libellé.
+  assert.deepEqual(await page.$$eval("#viz .viz-month-label", (t) => t.map((x) => x.textContent)), ["janv. 2026"]);
   // Export en image : un PNG valide, plus large que haut.
   const [download] = await Promise.all([page.waitForEvent("download"), page.click("#viz .viz-export-btn")]);
-  assert.equal(download.suggestedFilename(), "graphes-tous-les-clients.png");
+  assert.equal(download.suggestedFilename(), "graphe-tous-les-clients.png");
   const png = readFileSync(await download.path());
   assert.deepEqual([...png.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "signature PNG");
-  assert.ok(png.readUInt32BE(16) > png.readUInt32BE(20) && png.readUInt32BE(20) > 600, "dimensions de l'image");
-  assert.equal(await page.$$eval("#viz .viz-chart:first-child .viz-bar", (b) => b.length), 5, "3 jours de dispense + 2 jours de refund");
+  assert.ok(png.readUInt32BE(16) > png.readUInt32BE(20) && png.readUInt32BE(20) > 500, "dimensions de l'image");
   await page.keyboard.press("ArrowDown");
   assert.match(await page.textContent("#vizCaption"), /AAA \(K1\).*du 2026-01-01 au 2026-01-02/);
   await page.click("#viz .viz-toggle");
@@ -147,7 +169,7 @@ try {
   await page.keyboard.press("Enter");
   await page.waitForSelector("#synthScreen", { state: "hidden" });
   assert.equal((await cells("#tbody tr")).length, 2, "retour au tableau filtré sur le client");
-  step("synthèse par client, graphes synchronisés, export image, tableau des jours");
+  step("synthèse par client, graphe barres + courbes, export image, tableau des jours");
 
   // Version et mise à jour.
   const version = (await page.textContent("#version")).trim();
@@ -163,7 +185,7 @@ try {
   const fromArchives = await cells("#tbody tr");
   assert.equal(fromArchives.length, 8, "4 archives × 2 dates");
   assert.deepEqual(fromArchives.filter((_, i) => i % 2 === 0).map((r) => r[0]).sort(),
-    ["c.tar.gz/interne/c.xml2 dates", "c.tar/interne/c.xml2 dates", "c.zip/interne/c.xml2 dates", "c_stocke.zip/interne/c.xml2 dates"].sort());
+    ["c.tar.gz/interne/archive_c.xml2 dates", "c.tar/interne/archive_c.xml2 dates", "c.zip/interne/archive_c.xml2 dates", "c_stocke.zip/interne/archive_c.xml2 dates"].sort());
   for (const r of fromArchives.filter((_, i) => i % 2 === 1)) assert.deepEqual(r.slice(1, 4), ["BBB (K2)", "2026-01-03", "2026-01-03"]);
   assert.deepEqual(await page.$$eval("#ignoredList li", (l) => l.length), 0);
   await page.focus("#tableWrap");

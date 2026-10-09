@@ -52,7 +52,8 @@
     sel: 0,
     filter: "",
     client: null,      // clé du client sélectionné, ou null
-    date: null,        // date sélectionnée, ou null
+    dmin: "",          // période sélectionnée : première date incluse (AAAA-MM-JJ), ou ""
+    dmax: "",          // dernière date incluse, ou ""
     short: false,      // noms de fichier raccourcis
     gen: 0,
     usePickerApi: typeof window.showDirectoryPicker === "function",
@@ -279,7 +280,20 @@
     return { units: list, nRows: list.reduce((n, u) => n + u.dates.size, 0) };
   }
 
-  // Lignes (fichier × client × date) compte tenu du client et de la date sélectionnés.
+  // Une date est-elle dans la période sélectionnée ? Sans date, elle n'est dans aucune période.
+  function inRange(d) {
+    if (!state.dmin && !state.dmax) return true;
+    if (!d) return false;
+    return (!state.dmin || d >= state.dmin) && (!state.dmax || d <= state.dmax);
+  }
+  function rangeText() {
+    if (state.dmin && state.dmax) return state.dmin === state.dmax ? "le " + state.dmin : "du " + state.dmin + " au " + state.dmax;
+    if (state.dmin) return "à partir du " + state.dmin;
+    if (state.dmax) return "jusqu'au " + state.dmax;
+    return "toutes dates";
+  }
+
+  // Lignes (fichier × client × date) compte tenu du client et de la période sélectionnés.
   function buildRows() {
     const rows = [];
     for (const f of state.files) {
@@ -288,7 +302,7 @@
         if (state.client !== null && u.key !== state.client) continue;
         const dates = [...u.dates.keys()].sort();
         for (const d of dates) {
-          if (state.date !== null && d !== state.date) continue;
+          if (!inRange(d)) continue;
           const a = u.dates.get(d);
           rows.push({
             file: f, entry: f.entry, path: f.entry.path, unit: u,
@@ -469,24 +483,37 @@
     await load();
   }
 
-  // ---- Sélection par client et par date -----------------------------------
+  // ---- Sélection par client et par période ---------------------------------
+  const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+  const monthLabel = new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" });
+  // Premier et dernier jour d'un mois « AAAA-MM ».
+  function monthBounds(ym) {
+    const [y, m] = ym.split("-").map(Number);
+    return [ym + "-01", ym + "-" + String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")];
+  }
+
   function fillSelectors() {
-    const byClient = new Map(), byDate = new Map(), labels = new Map();
+    const byClient = new Map(), byMonth = new Map(), labels = new Map();
     const bump = (map, key, f) => { let s = map.get(key); if (!s) { s = new Set(); map.set(key, s); } s.add(f); };
+    let first = "", last = "";
     for (const f of state.files) {
       for (const u of f.res.units) {
         bump(byClient, u.key, f);
         labels.set(u.key, u.label);
-        u.dates.forEach((_a, d) => bump(byDate, d, f));
+        u.dates.forEach((_a, d) => {
+          if (!ISO_DATE.test(d)) return;
+          bump(byMonth, d.slice(0, 7), f);
+          if (!first || d < first) first = d;
+          if (!last || d > last) last = d;
+        });
       }
     }
     if (state.client !== null && !byClient.has(state.client)) state.client = null;
-    if (state.date !== null && !byDate.has(state.date)) state.date = null;
 
     const fill = (sel, map, all, label, current) => {
       sel.textContent = "";
-      const first = el("option", null, all + " (" + fmtInt.format(map.size) + ")");
-      first.value = ""; sel.appendChild(first);
+      const head = el("option", null, all);
+      head.value = ""; sel.appendChild(head);
       [...map.keys()].sort((a, b) => cmpText(label(a), label(b))).forEach((k) => {
         const o = el("option", null, label(k) + "  (" + plural(map.get(k).size, "fichier", "fichiers") + ")");
         o.value = "v:" + k;
@@ -494,22 +521,47 @@
         sel.appendChild(o);
       });
     };
-    fill($("selClient"), byClient, "Tous", (k) => labels.get(k), state.client);
-    fill($("selDate"), byDate, "Toutes", (d) => d || NO_DATE, state.date);
+    fill($("selClient"), byClient, "Tous (" + fmtInt.format(byClient.size) + ")", (k) => labels.get(k), state.client);
+    // Les mois sont listés dans l'ordre du calendrier ; le libellé est en clair, la valeur reste « AAAA-MM ».
+    const sel = $("selMonth");
+    sel.textContent = "";
+    const head = el("option", null, "Mois complet…");
+    head.value = ""; sel.appendChild(head);
+    [...byMonth.keys()].sort().forEach((ym) => {
+      const o = el("option", null, monthLabel.format(new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5) - 1, 1))) + "  (" + plural(byMonth.get(ym).size, "fichier", "fichiers") + ")");
+      o.value = ym; sel.appendChild(o);
+    });
+    // Les champs de date sont bornés aux dates présentes dans les fichiers.
+    for (const id of ["dateMin", "dateMax"]) { $(id).min = first; $(id).max = last; }
+    syncRangeInputs();
+  }
+
+  // Reflète la période dans les champs, et le mois dans la liste si la période est un mois entier.
+  function syncRangeInputs() {
+    $("dateMin").value = state.dmin;
+    $("dateMax").value = state.dmax;
+    let month = "";
+    if (state.dmin && state.dmax && state.dmin.slice(0, 7) === state.dmax.slice(0, 7)) {
+      const b = monthBounds(state.dmin.slice(0, 7));
+      if (b[0] === state.dmin && b[1] === state.dmax) month = state.dmin.slice(0, 7);
+    }
+    $("selMonth").value = [...$("selMonth").options].some((o) => o.value === month) ? month : "";
   }
 
   function applySelection() {
-    const c = $("selClient").value, d = $("selDate").value;
+    const c = $("selClient").value;
     state.client = c === "" ? null : c.slice(2);
-    state.date = d === "" ? null : d.slice(2);
+    let lo = $("dateMin").value, hi = $("dateMax").value;
+    if (lo && hi && lo > hi) { const t = lo; lo = hi; hi = t; }      // bornes saisies à l'envers
+    state.dmin = lo; state.dmax = hi;
+    syncRangeInputs();
     state.sel = 0;
     buildRows();
     render();
-    $("tableWrap").focus();
   }
 
   function renderSynth(t) {
-    const active = state.client !== null || state.date !== null;
+    const active = state.client !== null || !!state.dmin || !!state.dmax;
     $("selbar").classList.toggle("active", active);
     $("selClear").hidden = !active;
     const box = $("synth");
@@ -523,7 +575,7 @@
     };
     item("Fichiers", fmtInt.format(t.files));
     if (state.client === null) item("Clients", fmtInt.format(t.clients));
-    if (state.date === null) item("Dates", fmtInt.format(t.dates));
+    if (!(state.dmin && state.dmin === state.dmax)) item("Dates", fmtInt.format(t.dates));
     item("Flux", fmtInt.format(t.nFlux));
     item("Items", fmtInt.format(t.items));
     item("TTC", money(t.ttc));
@@ -544,11 +596,11 @@
     }
   }
 
-  // Nom affiché : entier, ou les premiers caractères du nom (sans le chemin) si « Noms courts ».
+  // Nom affiché : entier, ou les derniers caractères du nom (sans le chemin) si « Noms courts ».
   function displayName(path) {
     if (!state.short) return path;
     const base = path.split("/").pop();
-    return base.length > SHORT_LEN ? base.slice(0, SHORT_LEN) + "…" : base;
+    return base.length > SHORT_LEN ? "…" + base.slice(-SHORT_LEN) : base;
   }
 
   function sortValue(col, r) {
@@ -865,13 +917,14 @@
     { id: "d", label: "Dispense", cls: "s1" },
     { id: "r", label: "Refund", cls: "s2" },
   ];
-  const CHARTS = [
-    { title: "Nombre par jour", short: "Nombre", integer: true, keys: { d: "dN", r: "rN" }, fmtTick: (v) => fmtInt.format(v), fmtValue: (v) => fmtInt.format(v) },
-    { title: "Valeur HT par jour, en euros", short: "Valeur HT", integer: false, keys: { d: "dHT", r: "rHT" }, fmtTick: (v) => fmtTick.format(v), fmtValue: (v) => fmtDec.format(v) },
+  // Un seul graphe : les montants en barres (axe de gauche), les volumes en courbes (axe de droite).
+  const MEASURES = [
+    { mark: "line", short: "Nombre", axis: "Nombre", keys: { d: "dN", r: "rN" }, fmtTick: (v) => fmtInt.format(v), fmtValue: (v) => fmtInt.format(v) },
+    { mark: "bar", short: "Valeur HT", axis: "Valeur HT (€)", keys: { d: "dHT", r: "rHT" }, fmtTick: (v) => fmtTick.format(v), fmtValue: (v) => fmtDec.format(v) },
   ];
   const synth = { rows: [], sel: 0 };
 
-  // Porte sur tous les fichiers chargés, quelles que soient les sélections du tableau.
+  // Porte sur tous les clients des fichiers chargés, dans la période sélectionnée au tableau.
   function buildSynth() {
     const mk = (key, label) => ({ key, label, units: new Set(), byDay: new Map(), nFlux: 0, ht: 0, tva: 0, ttc: 0, refN: 0, refHt: 0, refTtc: 0 });
     const all = mk(null, "Tous les clients");
@@ -881,8 +934,9 @@
         let c = map.get(u.key);
         if (!c) { c = mk(u.key, u.label); map.set(u.key, c); }
         for (const t of [c, all]) {
-          t.units.add(f.entry.path + "\u0001" + u.key);
           u.dates.forEach((a, d) => {
+            if (!inRange(d)) return;
+            t.units.add(f.entry.path + "\u0001" + u.key);
             let day = t.byDay.get(d);
             if (!day) { day = { date: d, dN: 0, dHT: 0, rN: 0, rHT: 0 }; t.byDay.set(d, day); }
             const n = a.inv.size + a.noId, ht = a.ttc - a.tva, rht = a.refTtc - a.refTva;
@@ -893,7 +947,7 @@
         }
       }
     }
-    const rows = [all, ...[...map.values()].sort((a, b) => cmpText(a.label, b.label))];
+    const rows = [all, ...[...map.values()].filter((c) => c.units.size).sort((a, b) => cmpText(a.label, b.label))];
     for (const r of rows) { r.files = r.units.size; r.days = r.byDay.size; r.netHt = r.ht - r.refHt; }
     synth.rows = rows;
   }
@@ -947,9 +1001,9 @@
     $("vizCaption").textContent = "Par jour : " + r.label + span;
     const slug = r.label.normalize("NFD").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "client";
     window.DayCharts.render($("viz"), {
-      days, charts: CHARTS, series: SERIES, fmtDate: fmtDay,
+      days, measures: MEASURES, series: SERIES, fmtDate: fmtDay,
       title: $("vizCaption").textContent,
-      fileName: "graphes-" + slug + ".png",
+      fileName: "graphe-" + slug + ".png",
       onExport: (err) => toast(err ? "Export impossible : " + errText(err) : "Image enregistrée dans vos téléchargements."),
     });
   }
@@ -960,7 +1014,7 @@
     buildSynth();
     const i = state.client === null ? 0 : synth.rows.findIndex((r) => r.key === state.client);
     synth.sel = i < 0 ? 0 : i;
-    $("sScope").textContent = plural(synth.rows[0].files, "fichier chargé", "fichiers chargés") + ", toutes dates";
+    $("sScope").textContent = plural(synth.rows[0].files, "fichier", "fichiers") + ", " + rangeText();
     $("list").hidden = true;
     $("synthScreen").hidden = false;
     renderSynthScreen();
@@ -973,8 +1027,8 @@
     $("list").hidden = false;
     if (clientKeyToShow !== undefined) {
       $("selClient").value = clientKeyToShow === null ? "" : "v:" + clientKeyToShow;
-      $("selDate").value = "";
       applySelection();
+      $("tableWrap").focus();
       return;
     }
     $("tableWrap").scrollTop = savedScroll;
@@ -1003,6 +1057,33 @@
     a.download = "stats-reconciliation-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + ".csv";
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  // ---- Noms des fichiers affichés, vers le presse-papiers --------------------
+  // Un nom par fichier présent dans le tableau (sélections et filtre appliqués), séparés par des virgules.
+  async function copyNames() {
+    const names = [];
+    const seen = new Set();
+    for (const r of state.view) {
+      if (seen.has(r.path)) continue;
+      seen.add(r.path);
+      names.push(r.path.split("/").pop());
+    }
+    if (!names.length) { toast("Aucun fichier affiché."); return; }
+    const text = names.join(",");
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
+      else throw new Error("presse-papiers indisponible");
+    } catch (e) {
+      // Repli pour les navigateurs sans accès direct au presse-papiers.
+      const ta = el("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      if (!ok) { toast("Copie impossible : presse-papiers refusé par le navigateur."); return; }
+    }
+    toast(plural(names.length, "nom de fichier copié", "noms de fichier copiés") + " dans le presse-papiers.");
   }
 
   // ---- Messages -----------------------------------------------------------
@@ -1096,12 +1177,22 @@
   $("csv").addEventListener("click", exportCsv);
   $("openSynth").addEventListener("click", openSynth);
   $("version").addEventListener("click", checkUpdate);
-  $("selClient").addEventListener("change", applySelection);
-  $("selDate").addEventListener("change", applySelection);
-  $("selClear").addEventListener("click", () => {
-    $("selClient").value = ""; $("selDate").value = "";
-    applySelection();
+  const selectAndFocus = () => { applySelection(); $("tableWrap").focus(); };
+  $("selClient").addEventListener("change", selectAndFocus);
+  // Un mois choisi dans la liste remplit les deux bornes avec son premier et son dernier jour.
+  $("selMonth").addEventListener("change", (e) => {
+    const b = e.target.value ? monthBounds(e.target.value) : ["", ""];
+    $("dateMin").value = b[0]; $("dateMax").value = b[1];
+    selectAndFocus();
   });
+  // Les bornes s'appliquent pendant la saisie, sans quitter le champ.
+  $("dateMin").addEventListener("change", applySelection);
+  $("dateMax").addEventListener("change", applySelection);
+  $("selClear").addEventListener("click", () => {
+    $("selClient").value = ""; $("dateMin").value = ""; $("dateMax").value = "";
+    selectAndFocus();
+  });
+  $("copyNames").addEventListener("click", copyNames);
   $("shortNames").addEventListener("change", (e) => {
     state.short = e.target.checked;
     pref("shortNames", state.short ? "1" : "0");
@@ -1158,7 +1249,7 @@
     const inWrap = e.target === $("tableWrap") || e.target === document.body;
     if (e.key === "/") { e.preventDefault(); $("filter").focus(); $("filter").select(); return; }
     if (e.key === "c" || e.key === "C") { e.preventDefault(); $("selClient").focus(); return; }
-    if (e.key === "d" || e.key === "D") { e.preventDefault(); $("selDate").focus(); return; }
+    if (e.key === "d" || e.key === "D") { e.preventDefault(); $("dateMin").focus(); return; }
     if (e.key === "s" || e.key === "S") { e.preventDefault(); openSynth(); return; }
     if (!inWrap || !state.view.length) return;
     let i = state.sel;

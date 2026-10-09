@@ -4,6 +4,10 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, readdirSync } f
 
 const { version } = JSON.parse(readFileSync("version.json", "utf8"));
 if (!/^\d+$/.test(version)) throw new Error("version.json : la version doit être un nombre, par exemple \"02\".");
+// Chaque version publiée doit avoir son entrée dans le journal des modifications.
+if (!new RegExp("^## v" + version + "\\b", "m").test(readFileSync("CHANGELOG.md", "utf8"))) {
+  throw new Error("CHANGELOG.md : il manque l'entrée « ## v" + version + " ».");
+}
 
 // node-unrar-js fabrique du code à la volée (new Function), ce que la politique de sécurité
 // de la page interdit. On remplace ces deux fonctions par leurs équivalents sans évaluation

@@ -16,16 +16,17 @@ Application en ligne : <https://angstik.github.io/XML_browser/>
   TTC, TVA, HT, refunds, net, contrôle avec le trailer.
 - **Doublons** : un fichier qui donne plusieurs lignes (plusieurs dates ou plusieurs clients)
   est coloré, une couleur par fichier concerné.
-- **Sélections** : par client, par date, filtre texte, tri par colonne, noms de fichier
-  raccourcis à 5 caractères, export CSV.
-- **Synthèse par client** : totaux par client, et deux graphes par jour (nombre, valeur HT)
-  pour les dispenses et les refunds, avec leur tableau. L'axe des jours est continu, un trait
-  vertical marque chaque 1er du mois, les deux graphes défilent ensemble et s'exportent en
-  image PNG.
+- **Sélections** : par client, par période (date minimale et maximale, ou mois complet),
+  filtre texte, tri par colonne, noms de fichier raccourcis aux 5 derniers caractères,
+  export CSV, copie des noms de fichier affichés dans le presse-papiers.
+- **Synthèse par client** : totaux par client sur la période sélectionnée, et un graphe par
+  jour : montants HT en barres, volumes en courbes, pour les dispenses et les refunds. L'axe
+  des jours est continu, un trait vertical marque chaque 1er du mois, et le graphe s'exporte
+  en image PNG. Un tableau donne les mêmes valeurs.
 - **Visionneuse XML** en lecture seule : coloration, recherche, repli par élément ou par niveau.
 
 Clavier : `↑` `↓` parcourir, `Entrée` ouvrir, `Échap` revenir, `/` filtrer, `C` client,
-`D` date, `S` synthèse.
+`D` période, `S` synthèse.
 
 ## Confidentialité
 
@@ -44,7 +45,8 @@ La version vit dans `version.json`, à la racine du dépôt. Pour publier :
 
 1. modifier le code ;
 2. incrémenter `version.json` (par exemple `"02"`) ;
-3. pousser sur `main`.
+3. décrire la version dans `CHANGELOG.md` (le build l'exige) ;
+4. pousser sur `main`.
 
 Le workflow `.github/workflows/deploy.yml` construit `dist/`, lance le test de bout en bout,
 puis déploie sur GitHub Pages. Les autres branches sont construites et testées, pas déployées.
@@ -66,7 +68,7 @@ Avant le premier `npm test` : `npx playwright install chromium`.
 |---|---|
 | `src/app.js` | lecture des sources, analyse, tableau, sélections, synthèse, version |
 | `src/viewer.js` | visionneuse XML (CodeMirror 6) |
-| `src/charts.js` | graphes par jour en SVG |
+| `src/charts.js` | graphe par jour en SVG |
 | `src/archives.js` | lecture des archives ZIP, TAR et GZIP, sans bibliothèque |
 | `src/rar.js` | lecture des archives RAR (node-unrar-js, WebAssembly) |
 | `src/sw.js` | service worker : cache hors ligne par version |
@@ -76,6 +78,8 @@ Avant le premier `npm test` : `npx playwright install chromium`.
 `build.mjs` remplace deux fonctions de node-unrar-js qui fabriquent du code à la volée
 (`new Function`), interdit par la politique de sécurité. La version de node-unrar-js est donc
 figée dans `package.json` ; le build échoue si le correctif ne s'applique plus.
+
+L'historique des versions est dans [CHANGELOG.md](CHANGELOG.md).
 
 ## Dépendances embarquées
 

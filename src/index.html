@@ -32,13 +32,18 @@
 
   <div id="selbar" class="selbar" hidden>
     <label>Client <select id="selClient" title="Raccourci : C"></select></label>
-    <label>Date <select id="selDate" title="Date de dispense ou de refund. Raccourci : D"></select></label>
+    <span class="range" title="Période, sur la date de dispense ou de refund">
+      <label>Du <input type="date" id="dateMin" title="Première date incluse. Raccourci : D"></label>
+      <label>au <input type="date" id="dateMax" title="Dernière date incluse"></label>
+      <select id="selMonth" aria-label="Sélectionner un mois complet" title="Remplit les deux dates avec un mois complet"></select>
+    </span>
     <input id="filter" type="search" placeholder="Filtrer par fichier, date ou client" aria-label="Filtrer les lignes">
     <button id="selClear" type="button" hidden>Tout afficher</button>
     <span class="spacer"></span>
-    <label class="check" title="N'afficher que les 5 premiers caractères du nom de fichier"><input type="checkbox" id="shortNames"> Noms courts</label>
+    <label class="check" title="N'afficher que les 5 derniers caractères du nom de fichier"><input type="checkbox" id="shortNames"> Noms courts</label>
     <label class="check"><input type="checkbox" id="recursive"> Sous-répertoires</label>
     <button id="openSynth" type="button" title="Raccourci : S">Synthèse par client</button>
+    <button id="copyNames" type="button" title="Copie dans le presse-papiers les noms des fichiers affichés, séparés par des virgules">Copier les noms</button>
     <button id="csv" type="button">Exporter en CSV</button>
     <span id="synth" class="synth" aria-live="polite"></span>
   </div>
@@ -72,7 +77,7 @@
     <span><kbd>Entrée</kbd> ou clic : ouvrir le fichier</span>
     <span><kbd>/</kbd> filtrer</span>
     <span><kbd>C</kbd> client</span>
-    <span><kbd>D</kbd> date</span>
+    <span><kbd>D</kbd> période</span>
     <span><kbd>S</kbd> synthèse</span>
     <span id="count" class="count"></span>
   </footer>
@@ -118,7 +123,7 @@
     </figure>
   </div>
   <footer class="hint">
-    <span><kbd>↑</kbd> <kbd>↓</kbd> changer de client : les graphes suivent</span>
+    <span><kbd>↑</kbd> <kbd>↓</kbd> changer de client : le graphe suit</span>
     <span><kbd>Entrée</kbd> voir les lignes de ce client dans le tableau</span>
     <span><kbd>Échap</kbd> retour</span>
   </footer>

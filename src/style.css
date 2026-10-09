@@ -123,7 +123,9 @@ details li span { font-family: var(--sans); color: var(--muted); }
 .selbar.active { background: color-mix(in srgb, var(--accent) 11%, var(--surface)); }
 .selbar label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
 .selbar select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; max-width: 34ch; }
-.selbar.active select { background: var(--surface); }
+.selbar input[type="date"] { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; color-scheme: light dark; }
+.selbar.active select, .selbar.active input[type="date"] { background: var(--surface); }
+.selbar .range { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .selbar button { padding: 3px 9px; }
 .synth { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .synth .s-item:first-child { border-left: none; }
@@ -261,35 +263,51 @@ tfoot td:first-child { z-index: 3; }
 #sBody tr.all td { font-weight: 650; }
 #synthScreen .bar h1 { margin-left: 4px; }
 
-/* Graphes par jour. Deux séries : dispense (bleu), refund (orange), validées daltonisme et contraste. */
+/* Graphe par jour. Dispense en bleu, refund en orange ; barres pour les montants, courbes plus
+   foncées pour les volumes. Les quatre couleurs sont validées (daltonisme, contraste) dans les deux thèmes. */
 .viz-root {
   margin: 0; padding: 16px 16px 24px; background: var(--surface); flex: 1;
-  --series-1: #2a78d6; --series-2: #eb6834; --grid: #e6eaee; --axis: #b9c2cb;
+  --bar-1: #2a78d6; --bar-2: #eb6834; --line-1: #184f95; --line-2: #b3421a; --grid: #e6eaee; --axis: #b9c2cb;
 }
 .viz-root figcaption { font-size: 15px; font-weight: 650; margin-bottom: 10px; }
 .viz-head { display: flex; align-items: center; gap: 16px; }
 .viz-legend { display: flex; gap: 18px; font-size: 13px; margin-right: auto; }
 .viz-key { display: inline-flex; align-items: center; gap: 6px; }
 .viz-key i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
-i.s1 { background: var(--series-1); }
-i.s2 { background: var(--series-2); }
+i.s1 { background: var(--bar-1); }
+i.s2 { background: var(--bar-2); }
+.viz-key i.k-line { width: 16px; height: 2px; border-radius: 1px; }
+i.k-line.s1 { background: var(--line-1); }
+i.k-line.s2 { background: var(--line-2); }
 .viz-head { gap: 8px; }
 .viz-head button { font-size: 13px; padding: 3px 9px; }
-.viz-title { font-size: 13px; font-weight: 600; color: var(--muted); margin: 16px 0 2px; }
+.viz-plots { margin-top: 12px; }
 .viz-row { display: flex; }
 .viz-row > svg { flex: none; }
 .viz-scroll { overflow-x: auto; flex: 1; min-width: 0; }
 .viz-month { stroke: var(--muted); stroke-width: 1; }
 .viz-month-label { font: 600 11px var(--sans); fill: var(--muted); }
 /* Export : couleurs du thème clair, quel que soit le thème affiché. */
-.viz-export { --series-1: #2a78d6; --series-2: #eb6834; --grid: #e6eaee; --axis: #b9c2cb; --ink: #17212b; --muted: #5e6b78; --surface: #ffffff; }
+.viz-export { --bar-1: #2a78d6; --bar-2: #eb6834; --line-1: #184f95; --line-2: #b3421a; --grid: #e6eaee; --axis: #b9c2cb; --ink: #17212b; --muted: #5e6b78; --surface: #ffffff; }
 .viz-scroll svg { display: block; }
 .viz-grid { stroke: var(--grid); stroke-width: 1; }
 .viz-axis { stroke: var(--axis); stroke-width: 1; }
 .viz-tick { font: 11px var(--sans); fill: var(--muted); font-variant-numeric: tabular-nums; }
 .viz-label { font: 600 11px var(--sans); fill: var(--ink); font-variant-numeric: tabular-nums; }
-.viz-bar.s1 { fill: var(--series-1); }
-.viz-bar.s2 { fill: var(--series-2); }
+.viz-bar.s1 { fill: var(--bar-1); }
+.viz-bar.s2 { fill: var(--bar-2); }
+.viz-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.viz-line.s1 { stroke: var(--line-1); }
+.viz-line.s2 { stroke: var(--line-2); }
+.viz-line-halo { fill: none; stroke: var(--surface); stroke-width: 5; stroke-linejoin: round; stroke-linecap: round; }
+.viz-dot { stroke: var(--surface); stroke-width: 2; }
+.viz-dot.s1 { fill: var(--line-1); }
+.viz-dot.s2 { fill: var(--line-2); }
+.viz-axes { display: flex; justify-content: space-between; margin-bottom: -6px; }
+.viz-axis-title { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.viz-axis-title i { display: inline-block; background: var(--muted); }
+.viz-axis-title i.k-bar { width: 8px; height: 9px; border-radius: 2px; }
+.viz-axis-title i.k-line { width: 14px; height: 2px; border-radius: 1px; }
 .viz-band { fill: transparent; }
 .viz-band.on { fill: var(--row-hover); }
 .viz-hit { fill: transparent; }
@@ -314,7 +332,7 @@ i.s2 { background: var(--series-2); }
 .viz-table tfoot td { position: static; }
 
 @media (prefers-color-scheme: dark) {
-  .viz-root { --series-1: #3987e5; --series-2: #d95926; --grid: #232b34; --axis: #3a4551; }
+  .viz-root { --bar-1: #256abf; --bar-2: #b8491f; --line-1: #3987e5; --line-2: #d95926; --grid: #232b34; --axis: #3a4551; }
   .dc0 { --dc: #ff7088; } .dc1 { --dc: #6db3ff; } .dc2 { --dc: #5ccb8f; } .dc3 { --dc: #b79cf0; }
   .dc4 { --dc: #f0a35a; } .dc5 { --dc: #4fc8cf; } .dc6 { --dc: #f07cc0; } .dc7 { --dc: #cfcb55; }
 }
