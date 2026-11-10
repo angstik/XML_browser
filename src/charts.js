@@ -2,7 +2,10 @@
 // en courbes (axe de droite), pour les dispenses et les refunds.
 // Chaque axe porte son unité et le type de tracé qui s'y lit ; les deux échelles ont le même
 // nombre de graduations, pour partager la même grille.
-// Exposé en global : window.DayCharts.render(root, { days, measures, series, fmtDate, title, fileName })
+// Option forecast : { mark: "bar" | "line", label } ajoute l'enveloppe prévisionnelle (bande et
+// courbe vertes) de la mesure indiquée, lue sur chaque jour dans fcE (prévu), fcLo et fcHi (bornes).
+// Un jour marqué flag est hors enveloppe (fond rouge) ; un jour future n'a que la prévision.
+// Exposé en global : window.DayCharts.render(root, { days, measures, series, fmtDate, title, fileName, forecast })
 (function () {
   "use strict";
 
@@ -76,7 +79,7 @@
   const M = { left: 64, right: 56, top: 34, bottom: 28, plot: 230, end: 12 };
 
   // Deux axes verticaux fixes (montants à gauche, volumes à droite) et un tracé qui défile entre les deux.
-  function drawChart(host, slots, bar, line, series, width, hover, fmtDate) {
+  function drawChart(host, slots, bar, line, series, width, hover, fmtDate, forecast) {
     const n = slots.length;
     const avail = Math.max(120, width - M.left - M.right);
     const slot = Math.max(26, (avail - M.end) / Math.max(1, n));        // toute la largeur disponible
@@ -88,6 +91,10 @@
     for (const d of slots) for (const s of series) {
       maxBar = Math.max(maxBar, d[bar.keys[s.id]] || 0);
       maxLine = Math.max(maxLine, d[line.keys[s.id]] || 0);
+    }
+    if (forecast) for (const d of slots) {
+      if (forecast.mark === "bar") maxBar = Math.max(maxBar, d.fcHi || 0);
+      else maxLine = Math.max(maxLine, d.fcHi || 0);
     }
     // Même nombre de graduations des deux côtés : une seule grille sert aux deux échelles.
     const barStep = niceStep(maxBar / 4, false);
@@ -119,6 +126,9 @@
       const band = svg("rect", { x: sx, y: M.top - 6, width: slot, height: M.plot + 6, class: "viz-band" });
       plot.appendChild(band);
       bands.push(band);
+      // Jour hors enveloppe : fond rouge sur toute la hauteur.
+      if (d.flag) plot.appendChild(svg("rect", { x: sx, y: M.top - 6, width: slot, height: M.plot + 6, class: "viz-flag" }));
+      if (d.future) plot.appendChild(svg("rect", { x: sx, y: M.top - 6, width: slot, height: M.plot + 6, class: "viz-future" }));
 
       // Trait vertical au 1er du mois à 0 h : bord gauche de la case du 1er.
       const month = monthStart(slots, i);
@@ -139,13 +149,32 @@
       }
     });
 
+    // Enveloppe prévisionnelle : bande verte (sous les barres) et courbe verte de la prévision.
+    if (forecast) {
+      const yF = forecast.mark === "bar" ? yBar : yLine;
+      const segs = [];
+      let cur = null;
+      slots.forEach((d, i) => {
+        if (d.fcE === undefined) { cur = null; return; }
+        if (!cur) { cur = []; segs.push(cur); }
+        cur.push({ x: i * slot + slot / 2, e: yF(d.fcE), lo: yF(d.fcLo), hi: yF(d.fcHi) });
+      });
+      const firstBar = plot.querySelector(".viz-bar");
+      for (const seg of segs) {
+        const area = seg.map((p, k) => (k ? "L" : "M") + p.x.toFixed(1) + "," + p.hi.toFixed(1)).join("")
+          + seg.slice().reverse().map((p) => "L" + p.x.toFixed(1) + "," + p.lo.toFixed(1)).join("") + "Z";
+        plot.insertBefore(svg("path", { d: area, class: "viz-fc-band" }), firstBar);
+        plot.appendChild(svg("path", { d: seg.map((p, k) => (k ? "L" : "M") + p.x.toFixed(1) + "," + p.e.toFixed(1)).join(""), class: "viz-fc-line" }));
+      }
+    }
+
     // Courbes des volumes, par-dessus les barres. La courbe s'interrompt sur les jours sans donnée ;
     // un liseré de la couleur du fond la détache des barres qu'elle croise.
     series.forEach((s) => {
       let path = "", open = false;
       const points = [];
       slots.forEach((d, i) => {
-        if (d.empty) { open = false; return; }
+        if (d.empty || d.future) { open = false; return; }
         const x = i * slot + slot / 2, y = yLine(d[line.keys[s.id]] || 0);
         path += (open ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1);
         open = true;
@@ -189,7 +218,7 @@
   }
 
   // ---- Export en image ----------------------------------------------------
-  const STYLE_PROPS = ["fill", "stroke", "stroke-width", "stroke-linejoin", "stroke-linecap", "font-family", "font-size", "font-weight"];
+  const STYLE_PROPS = ["fill", "fill-opacity", "stroke", "stroke-width", "stroke-linejoin", "stroke-linecap", "stroke-dasharray", "font-family", "font-size", "font-weight"];
 
   // Copie d'un SVG avec ses styles calculés écrits en attributs : il reste lisible hors de la page.
   function standalone(source) {
@@ -225,7 +254,10 @@
     let x = P;
     keys.forEach((k, i) => {
       if (k.kind === "bar") out.appendChild(svg("rect", { x, y: y - 10, width: 10, height: 10, rx: 2, fill: colors[i] }));
-      else {
+      else if (k.kind === "fc") {
+        out.appendChild(svg("rect", { x: x - 2, y: y - 11, width: 16, height: 12, fill: colors[i], "fill-opacity": 0.18 }));
+        out.appendChild(svg("line", { x1: x - 2, x2: x + 14, y1: y - 5, y2: y - 5, stroke: colors[i], "stroke-width": 2 }));
+      } else {
         out.appendChild(svg("line", { x1: x - 2, x2: x + 14, y1: y - 5, y2: y - 5, stroke: colors[i], "stroke-width": 2 }));
         out.appendChild(svg("circle", { cx: x + 6, cy: y - 5, r: 3.5, fill: colors[i] }));
       }
@@ -291,6 +323,20 @@
         keys.push({ kind: m.mark, label, swatch });
       }
     }
+    if (cfg.forecast) {
+      const item = el("span", "viz-key");
+      const swatch = el("i", "k-fc");
+      item.appendChild(swatch);
+      item.appendChild(document.createTextNode(cfg.forecast.label));
+      legend.appendChild(item);
+      keys.push({ kind: "fc", label: cfg.forecast.label, swatch });
+      if (days.some((d) => d.flag)) {
+        const flag = el("span", "viz-key");
+        flag.appendChild(el("i", "k-flag"));
+        flag.appendChild(document.createTextNode("Hors enveloppe"));
+        legend.appendChild(flag);
+      }
+    }
     head.appendChild(legend);
     const exportBtn = el("button", "viz-export-btn", "Exporter en image");
     exportBtn.type = "button";
@@ -332,7 +378,14 @@
         grid.appendChild(name);
         for (const m of measures) grid.appendChild(el("b", null, m.fmtValue(d[m.keys[s.id]] || 0)));
       }
-      tip.appendChild(grid);
+      if (cfg.forecast && d.fcE !== undefined) {
+        const fm = measures.find((m) => m.mark === cfg.forecast.mark);
+        const fc = el("div", "viz-tip-fc" + (d.flag ? " out" : ""));
+        fc.textContent = "Prévision " + fm.short.charAt(0).toLowerCase() + fm.short.slice(1) + " : " + fm.fmtValue(d.fcE)
+          + " (" + fm.fmtValue(d.fcLo) + " à " + fm.fmtValue(d.fcHi) + ")" + (d.flag ? ", hors enveloppe" : "");
+        tip.appendChild(grid);
+        tip.appendChild(fc);
+      } else tip.appendChild(grid);
       tip.hidden = false;
       const r = tip.getBoundingClientRect();
       let x = e.clientX + 14, y = e.clientY + 14;
@@ -349,7 +402,7 @@
       lastWidth = width;
       const scrolled = drawn ? drawn.scroller.scrollLeft : 0;
       plots.textContent = "";
-      drawn = drawChart(plots, slots, bar, line, series, width, hover, fmtDate);
+      drawn = drawChart(plots, slots, bar, line, series, width, hover, fmtDate, cfg.forecast);
       drawn.scroller.scrollLeft = scrolled;
     }
     draw();
@@ -365,17 +418,24 @@
     const thead = el("thead"), trh = el("tr");
     trh.appendChild(el("th", null, "Jour"));
     for (const s of series) for (const m of measures) trh.appendChild(el("th", null, s.label + " : " + m.short.charAt(0).toLowerCase() + m.short.slice(1)));
+    const fm = cfg.forecast ? measures.find((m) => m.mark === cfg.forecast.mark) : null;
+    if (fm) { trh.appendChild(el("th", null, "Prévision")); trh.appendChild(el("th", null, "Enveloppe")); }
     thead.appendChild(trh); table.appendChild(thead);
     const tbody = el("tbody");
     const sum = {};
     for (const d of slots) {
       if (d.empty) continue;
-      const tr = el("tr");
-      tr.appendChild(el("td", null, fmtDate(d.date, false)));
+      const tr = el("tr", d.flag ? "flag" : "");
+      tr.appendChild(el("td", null, fmtDate(d.date, false) + (d.future ? " (prévu)" : "")));
       for (const s of series) for (const m of measures) {
         const key = m.keys[s.id];
+        if (d.future) { tr.appendChild(el("td", null, "–")); continue; }
         sum[key] = (sum[key] || 0) + d[key];
         tr.appendChild(el("td", null, m.fmtValue(d[key])));
+      }
+      if (fm) {
+        tr.appendChild(el("td", null, d.fcE === undefined ? "–" : fm.fmtValue(d.fcE)));
+        tr.appendChild(el("td", null, d.fcE === undefined ? "–" : fm.fmtValue(d.fcLo) + " à " + fm.fmtValue(d.fcHi)));
       }
       tbody.appendChild(tr);
     }
@@ -383,6 +443,7 @@
     const tfoot = el("tfoot"), trf = el("tr");
     trf.appendChild(el("td", null, "Total"));
     for (const s of series) for (const m of measures) trf.appendChild(el("td", null, m.fmtValue(sum[m.keys[s.id]] || 0)));
+    if (fm) { trf.appendChild(el("td")); trf.appendChild(el("td")); }
     tfoot.appendChild(trf); table.appendChild(tfoot);
     tableWrap.appendChild(table);
     root.appendChild(tableWrap);

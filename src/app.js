@@ -1077,6 +1077,284 @@
     $("tableWrap").focus();
   }
 
+  // ---- Écran Analyse ------------------------------------------------------
+  // Porte sur les fichiers chargés, dans la période sélectionnée au tableau, tous clients.
+  // Un fichier au contenu identique à un autre n'est compté qu'une fois (il est signalé en doublon).
+  const HORIZON = 7;                         // jours de prévision au-delà du dernier jour
+  const wdFmt = new Intl.DateTimeFormat("fr-FR", { weekday: "short", timeZone: "UTC" });
+  const utcOf = (iso) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10));
+  const isoOf = (t) => new Date(t).toISOString().slice(0, 10);
+  const dayName = (iso) => wdFmt.format(new Date(utcOf(iso)));
+  const dayLabel = (iso) => iso + " (" + dayName(iso) + ")";
+  const monthName = (ym) => monthLabel.format(new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7) - 1, 1)));
+  const ana = { data: null, client: "", measure: "dHT" };
+
+  // Jours manquants entre deux dates, regroupés en plages.
+  function missingDays(first, last, present) {
+    const idx = [];
+    const t0 = utcOf(first), n = Math.round((utcOf(last) - t0) / Analysis.DAY) + 1;
+    for (let i = 0; i < n; i++) if (!present.has(isoOf(t0 + i * Analysis.DAY))) idx.push(i);
+    return { total: n, missing: idx.length, ranges: Analysis.ranges(idx).map((r) => ({ from: isoOf(t0 + r.from * Analysis.DAY), to: isoOf(t0 + r.to * Analysis.DAY), n: r.to - r.from + 1 })) };
+  }
+  const rangeLabel = (r) => r.from === r.to ? dayLabel(r.from) : dayLabel(r.from) + " au " + dayLabel(r.to);
+
+  function buildAnalysis() {
+    // Fichiers retenus : un seul par contenu identique.
+    const seenHash = new Set(), kept = [], identical = new Map();
+    for (const f of state.files) {
+      if (f.sameAs.length) { const g = identical.get(f.hash) || []; g.push(f); identical.set(f.hash, g); }
+      if (seenHash.has(f.hash)) continue;
+      seenHash.add(f.hash); kept.push(f);
+    }
+
+    const days = new Map(), months = new Map(), clients = new Map(), ids = new Map();
+    const repeated = [];
+    let undated = 0;
+    const mk = () => ({ n: 0, ht: 0, rN: 0, rHT: 0 });
+    for (const f of kept) {
+      for (const u of f.res.units) {
+        let c = clients.get(u.key);
+        if (!c) { c = { key: u.key, label: u.label, days: new Map(), files: new Set() }; clients.set(u.key, c); }
+        u.dates.forEach((a, d) => {
+          if (!inRange(d)) return;
+          const n = a.inv.size + a.noId;
+          if (!ISO_DATE.test(d)) { undated += n + a.refN; return; }
+          const v = { n, ht: (a.ttc - a.tva) / 100, rN: a.refN, rHT: (a.refTtc - a.refTva) / 100 };
+          c.files.add(f.entry.path);
+          for (const [map, key] of [[days, d], [months, d.slice(0, 7)], [c.days, d]]) {
+            let x = map.get(key);
+            if (!x) { x = mk(); x.clients = new Set(); map.set(key, x); }
+            x.n += v.n; x.ht += v.ht; x.rN += v.rN; x.rHT += v.rHT; x.clients.add(u.label);
+          }
+          // Flux répétés dans un même fichier : plus d'enregistrements que d'InvoiceID distincts.
+          const rep = a.dispN - n;
+          if (rep > 0) repeated.push({ path: f.entry.path, client: u.label, date: d, n: rep });
+          a.inv.forEach((id) => {
+            let l = ids.get(id);
+            if (!l) { l = []; ids.set(id, l); }
+            l.push({ f, client: u.label, date: d });
+          });
+        });
+      }
+    }
+
+    // Mois principal : celui qui compte le plus de flux.
+    let main = null;
+    months.forEach((m, ym) => { if (!main || m.n > months.get(main).n) main = ym; });
+    const dates = [...days.keys()].sort();
+    const first = dates[0], last = dates[dates.length - 1];
+
+    // Flux présents dans plusieurs fichiers différents.
+    const shared = new Map();
+    ids.forEach((l) => {
+      const files = [...new Set(l.map((x) => x.f))];
+      if (files.length < 2) return;
+      files.sort((a, b) => cmpText(a.entry.path, b.entry.path));
+      const key = files.map((f) => f.entry.path).join("\u0001");
+      let s = shared.get(key);
+      if (!s) { s = { files: files.map((f) => f.entry.path), n: 0, dates: new Set(), clients: new Set() }; shared.set(key, s); }
+      s.n++;
+      for (const x of l) { s.dates.add(x.date); s.clients.add(x.client); }
+    });
+
+    // Prévision par client, puis agrégée, pour les deux mesures.
+    const fc = { dN: null, dHT: null };
+    if (first) {
+      const t0 = utcOf(first), N = Math.round((utcOf(last) - t0) / Analysis.DAY) + 1, L = N + HORIZON;
+      for (const [mKey, field, floor, counts] of [["dN", "n", 1, true], ["dHT", "ht", 1, false]]) {
+        const agg = { e: new Float64Array(L), v: new Float64Array(L), actual: new Float64Array(N) };
+        const per = new Map();
+        clients.forEach((c) => {
+          const cd = [...c.days.keys()].sort();
+          if (!cd.length) return;
+          const off = Math.round((utcOf(cd[0]) - t0) / Analysis.DAY);
+          const values = [];
+          for (let i = off; i < N; i++) { const x = c.days.get(isoOf(t0 + i * Analysis.DAY)); values.push(x ? x[field] : 0); }
+          const m = Analysis.fit(values, utcOf(cd[0]), HORIZON, floor, counts);
+          const env = Analysis.envelope(values, m.e, m.sd);
+          for (let i = 0; i < m.e.length; i++) { agg.e[off + i] += m.e[i]; agg.v[off + i] += m.sd[i] ** 2; }
+          values.forEach((v, i) => { agg.actual[off + i] += v; });
+          per.set(c.key, { off, model: m.model, values, e: m.e, lo: env.lo, hi: env.hi, flags: env.flags });
+        });
+        const sd = agg.v.map(Math.sqrt);
+        const env = Analysis.envelope([...agg.actual], agg.e, sd);
+        fc[mKey] = { t0, N, per, all: { off: 0, values: [...agg.actual], e: agg.e, lo: env.lo, hi: env.hi, flags: env.flags } };
+      }
+    }
+
+    ana.data = { kept, identical: [...identical.values()], days, months, clients, main, first, last, undated, shared: [...shared.values()], repeated, fc };
+  }
+
+  function anaTable(headers, rows, opts = {}) {
+    const wrap = el("div", "ana-tablewrap");
+    const table = el("table", "ana-table");
+    const thead = el("thead"), tr = el("tr");
+    headers.forEach((h) => { const th = el("th", h.num ? "num" : "", h.label); if (h.title) th.title = h.title; tr.appendChild(th); });
+    thead.appendChild(tr); table.appendChild(thead);
+    const tbody = el("tbody");
+    rows.forEach((r) => {
+      const row = el("tr", r.cls || "");
+      r.cells.forEach((v, i) => row.appendChild(el("td", headers[i].num ? "num" : "", v === undefined ? "" : String(v))));
+      tbody.appendChild(row);
+    });
+    if (!rows.length) { const row = el("tr"); const td = el("td", "ana-none", opts.empty || "Rien à signaler."); td.colSpan = headers.length; row.appendChild(td); tbody.appendChild(row); }
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    return wrap;
+  }
+  const status = (ok, text) => { const p = el("p", "ana-status " + (ok ? "ok" : "warn")); p.textContent = text; return p; };
+  const listText = (set, max = 4) => { const a = [...set].sort(cmpText); return a.length > max ? a.slice(0, max).join(", ") + " et " + (a.length - max) + " autre(s)" : a.join(", "); };
+
+  function renderAnalysis() {
+    const A = ana.data;
+    const fmtE = (v) => fmtDec.format(v);
+    const fmtN = (v) => fmtInt.format(Math.round(v));
+    const body = $("aBody");
+    body.textContent = "";
+    if (!A.first) { body.appendChild(el("p", "ana-none", "Aucune date exploitable dans la période sélectionnée.")); return; }
+    const section = (id, title) => { const s = el("section", "ana-section"); s.id = id; s.appendChild(el("h2", null, title)); body.appendChild(s); return s; };
+
+    // Résumé
+    const mainM = A.months.get(A.main);
+    let outN = 0, outHT = 0;
+    A.months.forEach((m, ym) => { if (ym !== A.main) { outN += m.n; outHT += m.ht; } });
+    const glob = missingDays(A.first, A.last, new Set(A.days.keys()));
+    const clientGaps = [...A.clients.values()].map((c) => {
+      const cd = [...c.days.keys()].sort();
+      return cd.length ? { c, first: cd[0], last: cd[cd.length - 1], ...missingDays(cd[0], cd[cd.length - 1], new Set(cd)) } : null;
+    }).filter(Boolean);
+    const fcm = A.fc[ana.measure];
+    const zonesOf = (flags, off) => Analysis.ranges(flags.map((f) => f.t)).map((r) => ({ from: r.from, to: r.to, flags: flags.filter((f) => f.t >= r.from && f.t <= r.to), off }));
+    const allZones = [];
+    if (fcm) {
+      allZones.push(...zonesOf(fcm.all.flags, 0).map((z) => ({ ...z, label: "Tous les clients" })));
+      A.clients.forEach((c) => { const p = fcm.per.get(c.key); if (p) allZones.push(...zonesOf(p.flags, p.off).map((z) => ({ ...z, label: c.label }))); });
+    }
+
+    const sum = section("aSum", "Résumé");
+    sum.appendChild(status(outN === 0, "Mois principal : " + monthName(A.main) + ", " + plural(mainM.n, "flux", "flux") + ". Hors de ce mois : " + plural(outN, "flux", "flux") + ", " + fmtE(outHT) + " € HT."));
+    sum.appendChild(status(glob.missing === 0 && clientGaps.every((g) => !g.missing), "Jours : du " + dayLabel(A.first) + " au " + dayLabel(A.last) + ", " + plural(glob.missing, "jour manquant", "jours manquants") + " ; " + plural(clientGaps.filter((g) => g.missing).length, "client", "clients") + " avec des jours manquants."));
+    const sharedN = A.shared.reduce((n, s) => n + s.n, 0);
+    sum.appendChild(status(!A.identical.length && !sharedN && !A.repeated.length, "Doublons : " + plural(A.identical.reduce((n, g) => n + g.length - 1, 0), "fichier identique", "fichiers identiques") + " à un autre, " + plural(sharedN, "flux présent", "flux présents") + " dans plusieurs fichiers, " + plural(A.repeated.reduce((n, r) => n + r.n, 0), "flux répété", "flux répétés") + " dans un même fichier."));
+    sum.appendChild(status(!allZones.length, "Prévision (" + (ana.measure === "dHT" ? "valeur HT" : "nombre") + ") : " + plural(allZones.length, "zone douteuse", "zones douteuses") + " hors de l'enveloppe à ±" + fmtTick.format(Analysis.K) + " écarts robustes."));
+    if (A.undated) sum.appendChild(status(false, plural(A.undated, "enregistrement", "enregistrements") + " sans date de facture valide, exclus de l'analyse."));
+    if (A.kept.length < state.files.length) sum.appendChild(el("p", "ana-note", "Les fichiers identiques ne sont comptés qu'une fois dans les analyses ci-dessous."));
+
+    // 1. Mois
+    const sm = section("aMonths", "Flux hors du mois principal");
+    sm.appendChild(anaTable(
+      [{ label: "Mois" }, { label: "Flux", num: true }, { label: "Valeur HT", num: true }, { label: "Refunds", num: true }, { label: "Refunds HT", num: true }, { label: "Clients" }],
+      [...A.months.keys()].sort().map((ym) => { const m = A.months.get(ym); return { cls: ym === A.main ? "main" : "warn", cells: [monthName(ym) + (ym === A.main ? " (principal)" : ""), fmtN(m.n), fmtE(m.ht), fmtN(m.rN), fmtE(m.rHT), listText(m.clients)] }; })));
+    const perClientOut = [];
+    A.clients.forEach((c) => {
+      let n = 0, ht = 0, rN = 0; const ms = new Set();
+      c.days.forEach((x, d) => { if (d.slice(0, 7) !== A.main) { n += x.n; ht += x.ht; rN += x.rN; ms.add(monthName(d.slice(0, 7))); } });
+      if (n || rN) perClientOut.push({ cells: [c.label, fmtN(n), fmtE(ht), fmtN(rN), [...ms].join(", ")] });
+    });
+    sm.appendChild(el("h3", null, "Par client"));
+    sm.appendChild(anaTable([{ label: "Client" }, { label: "Flux hors mois", num: true }, { label: "Valeur HT", num: true }, { label: "Refunds", num: true }, { label: "Mois concernés" }], perClientOut, { empty: "Aucun client n'a de flux hors du mois principal." }));
+
+    // 2. Couverture des jours
+    const sd = section("aDays", "Couverture des jours");
+    sd.appendChild(el("p", "ana-note", "Un jour est présent s'il porte au moins un enregistrement (dispense ou refund). Tous clients : du " + dayLabel(A.first) + " au " + dayLabel(A.last) + ", " + plural(glob.total, "jour", "jours") + "."));
+    sd.appendChild(anaTable([{ label: "Jours manquants" }, { label: "Durée", num: true }], glob.ranges.map((r) => ({ cls: "warn", cells: [rangeLabel(r), plural(r.n, "jour", "jours")] })), { empty: "Aucun jour manquant." }));
+    sd.appendChild(el("h3", null, "Par client (entre son premier et son dernier jour)"));
+    sd.appendChild(anaTable(
+      [{ label: "Client" }, { label: "Premier jour" }, { label: "Dernier jour" }, { label: "Jours", num: true }, { label: "Manquants", num: true }, { label: "Écarts" }],
+      clientGaps.sort((a, b) => cmpText(a.c.label, b.c.label)).map((g) => ({ cls: g.missing ? "warn" : "", cells: [g.c.label, dayLabel(g.first), dayLabel(g.last), fmtN(g.total), fmtN(g.missing), g.ranges.map(rangeLabel).join(" ; ")] }))));
+
+    // 3. Doublons
+    const sdup = section("aDups", "Doublons");
+    sdup.appendChild(el("h3", null, "Fichiers au contenu identique"));
+    sdup.appendChild(anaTable([{ label: "Empreinte" }, { label: "Fichiers" }, { label: "Clients" }, { label: "Jours" }],
+      A.identical.map((g) => {
+        const cl = new Set(), ds = new Set();
+        g[0].res.units.forEach((u) => { cl.add(u.label); u.dates.forEach((_a, d) => ds.add(d)); });
+        return { cls: "warn", cells: [g[0].hash.slice(0, HASH_LEN), g.map((f) => f.entry.path).join(", "), listText(cl), listText(ds, 6)] };
+      }), { empty: "Aucun fichier identique." }));
+    sdup.appendChild(el("h3", null, "Flux (InvoiceID) présents dans plusieurs fichiers"));
+    sdup.appendChild(anaTable([{ label: "Fichiers" }, { label: "Flux communs", num: true }, { label: "Clients" }, { label: "Jours" }],
+      A.shared.sort((a, b) => b.n - a.n).map((s) => ({ cls: "warn", cells: [s.files.join(", "), fmtN(s.n), listText(s.clients), listText(s.dates, 6)] })), { empty: "Aucun flux commun à plusieurs fichiers." }));
+    sdup.appendChild(el("h3", null, "Flux répétés dans un même fichier"));
+    sdup.appendChild(anaTable([{ label: "Fichier" }, { label: "Client" }, { label: "Jour" }, { label: "Répétitions", num: true }],
+      A.repeated.map((r) => ({ cls: "warn", cells: [r.path, r.client, dayLabel(r.date), fmtN(r.n)] })), { empty: "Aucun flux répété." }));
+
+    // 4. Prévision
+    const sf = section("aFc", "Graphe et enveloppe prévisionnelle");
+    const ctrl = el("div", "ana-ctrl");
+    const selC = el("select"); selC.id = "aClient"; selC.setAttribute("aria-label", "Client du graphe");
+    const optAll = el("option", null, "Tous les clients (agrégat)"); optAll.value = ""; selC.appendChild(optAll);
+    [...A.clients.values()].sort((a, b) => cmpText(a.label, b.label)).forEach((c) => { const o = el("option", null, c.label); o.value = c.key; selC.appendChild(o); });
+    selC.value = ana.client;
+    const selM = el("select"); selM.id = "aMeasure"; selM.setAttribute("aria-label", "Mesure prévue");
+    [["dHT", "Prévision de la valeur HT"], ["dN", "Prévision du nombre de flux"]].forEach(([v, l]) => { const o = el("option", null, l); o.value = v; selM.appendChild(o); });
+    selM.value = ana.measure;
+    ctrl.appendChild(selC); ctrl.appendChild(selM);
+    sf.appendChild(ctrl);
+    sf.appendChild(el("p", "ana-note", "Courbe verte : prévision par jour, tendance du client corrigée du jour de la semaine ; bande verte : enveloppe à ±" + fmtTick.format(Analysis.K) + " écarts robustes ; fond rouge : jour hors enveloppe. L'agrégat additionne les prévisions des clients. La prévision se prolonge de " + HORIZON + " jours. Un client de moins de " + Analysis.MIN_DAYS + " jours actifs est prévu par sa simple moyenne par jour de la semaine."));
+    const fig = el("figure", "viz-root");
+    const cap = el("figcaption");
+    const host = el("div"); host.id = "aViz";
+    fig.appendChild(cap); fig.appendChild(host);
+    sf.appendChild(fig);
+    sf.appendChild(el("h3", null, "Zones douteuses (jours consécutifs hors enveloppe)"));
+    const fmV = ana.measure === "dHT" ? fmtE : fmtN;
+    const zoneRows = allZones.filter((z) => !ana.client || z.label === A.clients.get(ana.client).label)
+      .map((z) => {
+        const act = z.flags.reduce((s, f) => s + f.actual, 0), exp = z.flags.reduce((s, f) => s + f.expected, 0);
+        const d0 = isoOf(fcm.t0 + (z.off + z.from) * Analysis.DAY), d1 = isoOf(fcm.t0 + (z.off + z.to) * Analysis.DAY);
+        return { cls: "warn", sortKey: Math.abs(act - exp), cells: [z.label, rangeLabel({ from: d0, to: d1 }), fmtN(z.to - z.from + 1), fmV(act), fmV(exp), (exp ? (act >= exp ? "+" : "") + fmtTick.format(Math.round((act - exp) / exp * 100)) + " %" : "–")] };
+      }).sort((a, b) => b.sortKey - a.sortKey);
+    sf.appendChild(anaTable([{ label: "Client" }, { label: "Période" }, { label: "Jours", num: true }, { label: "Réel", num: true }, { label: "Prévu", num: true }, { label: "Écart", num: true }], zoneRows, { empty: "Aucun jour hors enveloppe." }));
+
+    const draw = () => {
+      const c = ana.client ? A.clients.get(ana.client) : null;
+      const p = c ? fcm.per.get(c.key) : fcm.all;
+      const src = c ? c.days : A.days;
+      const flagged = new Set(p.flags.map((f) => f.t));
+      const out = [];
+      for (let i = 0; i < p.e.length; i++) {
+        const date = isoOf(fcm.t0 + (p.off + i) * Analysis.DAY);
+        const x = src.get(date);
+        const future = i >= p.values.length;
+        out.push({ date, dN: x ? x.n : 0, dHT: x ? x.ht : 0, rN: x ? x.rN : 0, rHT: x ? x.rHT : 0, fcE: p.e[i], fcLo: p.lo[i], fcHi: p.hi[i], flag: flagged.has(i), future });
+      }
+      cap.textContent = "Par jour : " + (c ? c.label : "tous les clients") + (c && p.model !== "tendance" ? " (historique court : moyenne par jour de la semaine)" : "");
+      const slug = (c ? c.label : "tous").normalize("NFD").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
+      window.DayCharts.render(host, {
+        days: out, measures: MEASURES, series: SERIES, fmtDate: fmtDay,
+        title: cap.textContent, fileName: "analyse-" + slug + ".png",
+        forecast: { mark: ana.measure === "dHT" ? "bar" : "line", label: "Prévision et enveloppe, " + (ana.measure === "dHT" ? "valeur HT" : "nombre") },
+        onExport: (err) => toast(err ? "Export impossible : " + errText(err) : "Image enregistrée dans vos téléchargements."),
+      });
+    };
+    draw();
+    selC.addEventListener("change", () => { ana.client = selC.value; renderAnalysis(); $("aFc").scrollIntoView(); });
+    selM.addEventListener("change", () => { ana.measure = selM.value; renderAnalysis(); $("aFc").scrollIntoView(); });
+  }
+
+  function openAnalysis() {
+    if (!state.files.length) return;
+    savedScroll = $("tableWrap").scrollTop;
+    buildAnalysis();
+    if (ana.client && !ana.data.clients.has(ana.client)) ana.client = "";
+    $("aScope").textContent = plural(ana.data.kept.length, "fichier", "fichiers") + ", " + rangeText();
+    $("list").hidden = true;
+    $("anaScreen").hidden = false;
+    renderAnalysis();
+    $("aBody").scrollTop = 0;
+    $("aBody").focus();
+  }
+
+  function closeAnalysis() {
+    if ($("anaScreen").hidden) return;
+    $("anaScreen").hidden = true;
+    $("list").hidden = false;
+    $("tableWrap").scrollTop = savedScroll;
+    select(state.sel, true);
+    $("tableWrap").focus();
+  }
+
   // ---- Export CSV ---------------------------------------------------------
   function exportCsv() {
     const num = (v, dec) => (dec ? v.toFixed(2) : String(v)).replace(".", ",");
@@ -1217,6 +1495,8 @@
   $("recursive").addEventListener("change", load);
   $("csv").addEventListener("click", exportCsv);
   $("openSynth").addEventListener("click", openSynth);
+  $("openAnalysis").addEventListener("click", openAnalysis);
+  $("aBack").addEventListener("click", closeAnalysis);
   $("version").addEventListener("click", checkUpdate);
   const selectAndFocus = () => { applySelection(); $("tableWrap").focus(); };
   $("selClient").addEventListener("change", selectAndFocus);
@@ -1267,6 +1547,12 @@
       return;
     }
 
+    // Écran Analyse : Échap revient au tableau.
+    if (!$("anaScreen").hidden) {
+      if (e.key === "Escape") { e.preventDefault(); closeAnalysis(); }
+      return;
+    }
+
     // Écran de synthèse
     if (!$("synthScreen").hidden) {
       if (e.key === "Escape") { e.preventDefault(); closeSynth(); return; }
@@ -1292,6 +1578,7 @@
     if (e.key === "c" || e.key === "C") { e.preventDefault(); $("selClient").focus(); return; }
     if (e.key === "d" || e.key === "D") { e.preventDefault(); $("dateMin").focus(); return; }
     if (e.key === "s" || e.key === "S") { e.preventDefault(); openSynth(); return; }
+    if (e.key === "a" || e.key === "A") { e.preventDefault(); openAnalysis(); return; }
     if (!inWrap || !state.view.length) return;
     let i = state.sel;
     switch (e.key) {

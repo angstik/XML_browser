@@ -24,10 +24,14 @@ Application en ligne : <https://angstik.github.io/XML_browser/>
   jour : montants HT en barres, volumes en courbes, pour les dispenses et les refunds. L'axe
   des jours est continu, un trait vertical marque chaque 1er du mois, et le graphe s'exporte
   en image PNG. Un tableau donne les mêmes valeurs.
+- **Analyse** : contrôles de cohérence sur la période sélectionnée : flux hors du mois
+  principal, jours manquants (global et par client), fichiers identiques, flux présents dans
+  plusieurs fichiers ou répétés, et graphe par jour avec enveloppe prévisionnelle (tendance
+  par client corrigée du jour de la semaine) et zones hors enveloppe.
 - **Visionneuse XML** en lecture seule : coloration, recherche, repli par élément ou par niveau.
 
 Clavier : `↑` `↓` parcourir, `Entrée` ouvrir, `Échap` revenir, `/` filtrer, `C` client,
-`D` période, `S` synthèse.
+`D` période, `S` synthèse, `A` analyse.
 
 ## Confidentialité
 
@@ -70,6 +74,7 @@ Avant le premier `npm test` : `npx playwright install chromium`.
 | `src/app.js` | lecture des sources, analyse, tableau, sélections, synthèse, version |
 | `src/viewer.js` | visionneuse XML (CodeMirror 6) |
 | `src/charts.js` | graphe par jour en SVG |
+| `src/analysis.js` | calculs de l'analyse : prévision, enveloppe, plages de jours |
 | `src/archives.js` | lecture des archives ZIP, TAR et GZIP, sans bibliothèque |
 | `src/rar.js` | lecture des archives RAR (node-unrar-js, WebAssembly) |
 | `src/sw.js` | service worker : cache hors ligne par version |

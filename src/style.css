@@ -334,7 +334,45 @@ i.k-line.s2 { background: var(--line-2); }
 .viz-table td:first-child, .viz-table th:first-child { position: static; padding-left: 12px; }
 .viz-table tfoot td { position: static; }
 
+/* Écran Analyse */
+.ana-body { flex: 1; min-height: 0; overflow: auto; background: var(--surface); padding: 4px 16px 32px; }
+.ana-body:focus { outline: none; }
+.ana-section { max-width: 1400px; }
+.ana-section h2 { font-size: 16px; margin: 22px 0 8px; }
+.ana-section h3 { font-size: 13px; font-weight: 650; color: var(--muted); margin: 16px 0 6px; }
+.ana-status { margin: 4px 0; padding: 6px 10px 6px 12px; border-left: 4px solid; border-radius: 0 4px 4px 0; }
+.ana-status.ok { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, var(--surface)); }
+.ana-status.warn { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--surface)); }
+.ana-note { color: var(--muted); font-size: 13px; margin: 6px 0; max-width: 110ch; }
+.ana-tablewrap { overflow-x: auto; }
+.ana-table { width: auto; min-width: min(640px, 100%); }
+.ana-table th, .ana-table td { position: static; white-space: normal; text-align: left; padding: 6px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.ana-table th { font-size: 13px; color: var(--muted); font-weight: 600; background: var(--bg); }
+.ana-table th.num, .ana-table td.num { text-align: right; white-space: nowrap; }
+.ana-table tbody tr { cursor: default; }
+.ana-table tbody td { background: var(--surface); }
+.ana-table tr.warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.ana-table tr.main td { font-weight: 650; }
+.ana-table td.ana-none { color: var(--muted); }
+.ana-ctrl { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0; }
+.ana-ctrl select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; }
+#anaScreen .viz-root { padding: 8px 0 8px; }
+
+/* Prévision : bande et courbe vertes ; jours hors enveloppe sur fond rouge. */
+.viz-root { --fc: #1b7f4b; --flag: #c4122f; }
+.viz-fc-band { fill: var(--fc); fill-opacity: .16; stroke: none; }
+.viz-fc-line { fill: none; stroke: var(--fc); stroke-width: 2; stroke-dasharray: 6 3; stroke-linejoin: round; }
+.viz-flag { fill: var(--flag); fill-opacity: .13; }
+.viz-future { fill: var(--muted); fill-opacity: .07; }
+.viz-key i.k-fc { width: 16px; height: 10px; border-radius: 2px; background: color-mix(in srgb, var(--fc) 22%, transparent); border-top: 2px dashed var(--fc); }
+.viz-key i.k-flag { width: 10px; height: 10px; border-radius: 2px; background: color-mix(in srgb, var(--flag) 22%, transparent); }
+.viz-tip-fc { margin-top: 6px; color: var(--fc); font-weight: 600; }
+.viz-tip-fc.out { color: var(--flag); }
+.viz-table tr.flag td { background: color-mix(in srgb, var(--flag) 10%, var(--surface)); }
+.viz-export { --fc: #1b7f4b; --flag: #c4122f; }
+
 @media (prefers-color-scheme: dark) {
+  .viz-root { --fc: #5ccb8f; --flag: #ff7088; }
   .viz-root { --bar-1: #256abf; --bar-2: #b8491f; --line-1: #3987e5; --line-2: #d95926; --grid: #232b34; --axis: #3a4551; }
   .dc0 { --dc: #ff7088; } .dc1 { --dc: #6db3ff; } .dc2 { --dc: #5ccb8f; } .dc3 { --dc: #b79cf0; }
   .dc4 { --dc: #f0a35a; } .dc5 { --dc: #4fc8cf; } .dc6 { --dc: #f07cc0; } .dc7 { --dc: #cfcb55; }

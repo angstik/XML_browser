@@ -43,6 +43,7 @@
     <label class="check" title="N'afficher que les 5 derniers caractères du nom de fichier"><input type="checkbox" id="shortNames"> Noms courts</label>
     <label class="check"><input type="checkbox" id="recursive"> Sous-répertoires</label>
     <button id="openSynth" type="button" title="Raccourci : S">Synthèse par client</button>
+    <button id="openAnalysis" type="button" title="Contrôles de cohérence. Raccourci : A">Analyse</button>
     <button id="copyNames" type="button" title="Copie dans le presse-papiers les noms des fichiers affichés, séparés par des virgules">Copier les noms</button>
     <button id="csv" type="button">Exporter en CSV</button>
     <span id="synth" class="synth" aria-live="polite"></span>
@@ -79,6 +80,7 @@
     <span><kbd>C</kbd> client</span>
     <span><kbd>D</kbd> période</span>
     <span><kbd>S</kbd> synthèse</span>
+    <span><kbd>A</kbd> analyse</span>
     <span id="count" class="count"></span>
   </footer>
 </section>
@@ -129,10 +131,23 @@
   </footer>
 </section>
 
+<section id="anaScreen" class="screen" hidden>
+  <header class="bar">
+    <button id="aBack" type="button" title="Échap">Retour au tableau</button>
+    <h1>Analyse</h1>
+    <span id="aScope" class="dirname"></span>
+  </header>
+  <div id="aBody" class="ana-body" tabindex="0" aria-label="Analyse de cohérence"></div>
+  <footer class="hint">
+    <span><kbd>Échap</kbd> retour</span>
+  </footer>
+</section>
+
 <div id="toast" class="toast" hidden><span id="toastText"></span><button id="toastAction" type="button" hidden></button></div>
 
 <script src="viewer.js"></script>
 <script src="charts.js"></script>
+<script src="analysis.js"></script>
 <script src="archives.js"></script>
 <script src="app.js"></script>
 </body>

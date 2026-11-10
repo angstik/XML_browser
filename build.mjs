@@ -81,6 +81,7 @@ await build({ ...common, entryPoints: ["src/rar.js"], outfile: "dist/rar.js", pl
 writeFileSync("dist/app.js", readFileSync("src/app.js", "utf8").replace("__APP_VERSION__", version));
 cpSync("src/charts.js", "dist/charts.js");
 cpSync("src/archives.js", "dist/archives.js");
+cpSync("src/analysis.js", "dist/analysis.js");
 cpSync("src/style.css", "dist/app.css");
 cpSync("src/index.html", "dist/index.html");
 cpSync("src/manifest.webmanifest", "dist/manifest.webmanifest");
@@ -89,7 +90,7 @@ cpSync("node_modules/node-unrar-js/esm/js/unrar.wasm", "dist/unrar.wasm");
 writeFileSync("dist/version.json", JSON.stringify({ version }) + "\n");
 
 // Tout ce que le service worker met en cache pour le hors-ligne (version.json reste sur le réseau).
-const assets = ["./", "index.html", "app.css", "app.js", "viewer.js", "charts.js", "archives.js", "rar.js", "unrar.wasm", "manifest.webmanifest",
+const assets = ["./", "index.html", "app.css", "app.js", "viewer.js", "charts.js", "analysis.js", "archives.js", "rar.js", "unrar.wasm", "manifest.webmanifest",
   ...readdirSync("dist/icons").map((f) => "icons/" + f)];
 writeFileSync("dist/sw.js", readFileSync("src/sw.js", "utf8")
   .replace("__VERSION__", version)

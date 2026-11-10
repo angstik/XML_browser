@@ -179,6 +179,19 @@ try {
   assert.equal((await cells("#tbody tr")).length, 2, "retour au tableau filtré sur le client");
   step("synthèse par client, graphe barres + courbes, export image, tableau des jours");
 
+  // Écran Analyse.
+  await page.focus("#tableWrap");
+  await page.keyboard.press("a");
+  await page.waitForSelector("#aViz svg");
+  assert.equal(await page.$$eval(".ana-status", (p) => p.length), 4);
+  assert.match(await page.textContent("#aMonths"), /janvier 2026 \(principal\)/);
+  assert.match(await page.textContent("#aSum"), /Doublons : 0 fichier identique/);
+  assert.ok(await page.$$eval("#aViz .viz-fc-line", (l) => l.length) >= 1, "courbe de prévision");
+  assert.equal(await page.$$eval("#aViz .viz-future", (r) => r.length), 7, "7 jours de prévision");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("#anaScreen", { state: "hidden" });
+  step("écran Analyse");
+
   // Version et mise à jour.
   const version = (await page.textContent("#version")).trim();
   assert.match(version, /^v\d+$/);

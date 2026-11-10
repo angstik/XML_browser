@@ -4,6 +4,20 @@ Une entrée par version publiée, la plus récente en premier. Le numéro est ce
 `version.json`, affiché dans l'application. Le build échoue si la version courante n'a pas
 son entrée ici.
 
+## v06 (2026-11-10)
+
+- Nouvel écran « Analyse » (bouton ou touche A), sur la période sélectionnée, tous clients :
+  - mois principal (celui qui compte le plus de flux) et volume hors de ce mois (nombre,
+    valeur HT, refunds), global et par client ;
+  - couverture des jours : jours sans aucun enregistrement entre le premier et le dernier jour,
+    regroupés en plages, global et par client (entre son premier et son dernier jour) ;
+  - doublons : fichiers au contenu identique, flux (InvoiceID) présents dans plusieurs fichiers,
+    flux répétés dans un même fichier, avec les jours et les clients concernés ;
+  - graphe par jour avec enveloppe prévisionnelle verte : tendance par client (Theil-Sen)
+    corrigée du jour de la semaine, agrégée sur les clients, prolongée de 7 jours ; jours hors
+    enveloppe sur fond rouge et liste des zones douteuses.
+- Les fichiers identiques ne sont comptés qu'une fois dans l'analyse.
+
 ## v05 (2026-11-10)
 
 - Colonne « Émission » triable : date et heure d'émission du fichier (Header / FileDate et
