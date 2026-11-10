@@ -4,6 +4,17 @@ Une entrée par version publiée, la plus récente en premier. Le numéro est ce
 `version.json`, affiché dans l'application. Le build échoue si la version courante n'a pas
 son entrée ici.
 
+## v05 (2026-11-10)
+
+- Colonne « Émission » triable : date et heure d'émission du fichier (Header / FileDate et
+  FileTime), au format court AAMMJJ_HHMMSS. Elle remplace la colonne « Date fichier ».
+- Colonne « Empreinte » triable : début (10 caractères) de l'empreinte SHA-256 du contenu du
+  fichier. Un fichier au contenu identique à un autre fichier chargé est en rouge, avec la liste
+  des fichiers identiques au survol ; le total compte les doublons.
+- Colonnes Flux, TVA et HT retirées du tableau pour tenir dans la largeur de l'écran ; elles
+  restent dans l'export CSV, qui donne aussi l'empreinte complète.
+- Visionneuse : la date et l'heure d'émission, et l'empreinte, figurent dans l'en-tête.
+
 ## v04 (2026-10-09)
 
 - Période : sélection par date minimale et maximale, avec un raccourci « mois complet » qui

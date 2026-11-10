@@ -9,6 +9,7 @@ import { startServer } from "./serve.mjs";
 import { makeRar } from "./make-rar.mjs";
 import { makeZip, makeTar } from "./make-archives.mjs";
 import { gzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
 
 const rec = (tag, id, date, amount, tva = 0) => `
       <${tag}><PTxID>${id}</PTxID><TotalAmount>${amount.toFixed(2)}</TotalAmount>
@@ -16,7 +17,7 @@ const rec = (tag, id, date, amount, tva = 0) => `
         <InvoiceID>${id}</InvoiceID><InvoiceDate>${date}</InvoiceDate><Quantity>1</Quantity></${tag}>`;
 const block = (account, partner, dispenses, refunds) => `
   <ReconcileTransactions>
-    <Header><PartnerID>${partner}</PartnerID><PaymentAccountNumber>${account}</PaymentAccountNumber><FileDate>2026-01-03</FileDate></Header>
+    <Header><PartnerID>${partner}</PartnerID><PaymentAccountNumber>${account}</PaymentAccountNumber><FileDate>2026-01-03</FileDate><FileTime>23:58:27</FileTime></Header>
     <Detail><DispenseList>${dispenses.join("")}</DispenseList><SuccessfulRefundList>${refunds.join("")}</SuccessfulRefundList></Detail>
     <trailer><TotalDispenseRecords>${dispenses.length}</TotalDispenseRecords><TotalSuccessfulRefundRecords>${refunds.length}</TotalSuccessfulRefundRecords></trailer>
   </ReconcileTransactions>`;
@@ -69,14 +70,21 @@ try {
   const rows = await cells("#tbody tr");
   assert.equal(rows.length, 5, "5 lignes attendues : a, b×2 clients, c.rar×2 dates");
   assert.deepEqual(rows[0].slice(0, 4), ["a.xml", "AAA (K1)", "2026-01-01", "2026-01-01"]);
-  assert.deepEqual(rows[0].slice(5, 13), ["3", "3", "36,00", "6,00", "30,00", "1", "12,00", "24,00"]);
-  assert.equal(rows[0][13], "OK");
+  assert.equal(rows[0][4], "260103_235827", "émission AAMMJJ_HHMMSS");
+  assert.match(rows[0][5], /^[0-9a-f]{10}$/, "empreinte courte");
+  assert.deepEqual(rows[0].slice(6, 11), ["3", "36,00", "1", "12,00", "24,00"]);
+  assert.equal(rows[0][11], "OK");
+  assert.equal(rows[0].length, 12, "Flux, TVA et HT ne sont plus affichés");
+  // Empreinte : SHA-256 du contenu brut du fichier.
+  const expected = createHash("sha256").update(readFileSync(join(lot, "a.xml"))).digest("hex").slice(0, 10);
+  assert.equal(rows[0][5], expected);
+  assert.equal(await page.$$eval("#tbody td.hash-dup", (t) => t.length), 0, "aucun doublon dans le répertoire");
   assert.ok(rows[1][0].startsWith("b.xml") && rows[1][0].includes("2 clients"));
   assert.deepEqual([rows[1][1], rows[2][1]], ["AAA (K1)", "BBB (K2)"]);
   assert.ok(rows[3][0].startsWith("c.rar/interne/archive_c.xml") && rows[3][0].includes("2 dates"));
   assert.deepEqual([rows[3][2], rows[3][3], rows[4][2], rows[4][3]], ["2026-01-02", "", "2026-01-03", "2026-01-03"]);
   const total = (await cells("#tfoot tr"))[0];
-  assert.deepEqual([total[0], total[1], total[5], total[7]], ["Total : 4 fichiers", "2 clients", "8", "96,00"]);
+  assert.deepEqual([total[0], total[1], total[6], total[7]], ["Total : 4 fichiers", "2 clients", "8", "96,00"]);
   assert.deepEqual(await page.$$eval("#ignoredList li", (l) => l.map((x) => x.textContent)), ["notes.txt pas un fichier XML"]);
   step("tableau : répertoire, multi-clients, archive RAR, total");
 
@@ -187,6 +195,10 @@ try {
   assert.deepEqual(fromArchives.filter((_, i) => i % 2 === 0).map((r) => r[0]).sort(),
     ["c.tar.gz/interne/archive_c.xml2 dates", "c.tar/interne/archive_c.xml2 dates", "c.zip/interne/archive_c.xml2 dates", "c_stocke.zip/interne/archive_c.xml2 dates"].sort());
   for (const r of fromArchives.filter((_, i) => i % 2 === 1)) assert.deepEqual(r.slice(1, 4), ["BBB (K2)", "2026-01-03", "2026-01-03"]);
+  // Le même fichier dans 4 archives : même empreinte, signalée comme doublon.
+  assert.equal(new Set(fromArchives.map((r) => r[5])).size, 1);
+  assert.equal(await page.$$eval("#tbody td.hash-dup", (t) => t.length), 8);
+  assert.equal((await cells("#tfoot tr"))[0][5], "4 doublons");
   assert.deepEqual(await page.$$eval("#ignoredList li", (l) => l.length), 0);
   await page.focus("#tableWrap");
   await page.keyboard.press("Home");

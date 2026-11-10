@@ -186,6 +186,9 @@ tr.dup td.file, tr.dup td.c-client, tr.dup td.c-dateDisp, tr.dup td.c-dateRef { 
 .dc0 { --dc: #c4122f; } .dc1 { --dc: #0a5fb4; } .dc2 { --dc: #1b7f4b; } .dc3 { --dc: #7a3fb8; }
 .dc4 { --dc: #b25a00; } .dc5 { --dc: #0b7f86; } .dc6 { --dc: #b0207e; } .dc7 { --dc: #6b6a00; }
 td.c-client { font-family: var(--mono); font-size: 13px; }
+td.c-hash, td.c-emis { font-family: var(--mono); font-size: 12.5px; }
+/* Doublon de contenu : pastille rouge, distincte de la couleur de ligne des fichiers multi-lignes. */
+td.c-hash.hash-dup span { background: var(--red); color: var(--surface); font-weight: 650; border-radius: 3px; padding: 1px 5px; }
 
 td.file { font-family: var(--mono); font-size: 13px; }
 .fwrap { display: flex; align-items: center; max-width: 46ch; }

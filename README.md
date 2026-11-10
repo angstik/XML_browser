@@ -12,8 +12,9 @@ Application en ligne : <https://angstik.github.io/XML_browser/>
   (RAR, ZIP, TAR, TAR.GZ), ou un glisser-déposer. Une archive trouvée dans un répertoire est
   lue comme un répertoire. Un fichier `.gz` seul est lu comme le fichier qu'il contient.
 - **Tableau** : une ligne par fichier, client et date. Colonnes : client
-  (`PaymentAccountNumber (PartnerID)`), date dispense, date refund, date fichier, flux, items,
-  TTC, TVA, HT, refunds, net, contrôle avec le trailer.
+  (`PaymentAccountNumber (PartnerID)`), date dispense, date refund, émission (AAMMJJ_HHMMSS),
+  empreinte du contenu (détection des fichiers identiques), items, TTC, refunds, net, contrôle
+  avec le trailer. L'export CSV ajoute flux, TVA, HT et l'empreinte complète.
 - **Doublons** : un fichier qui donne plusieurs lignes (plusieurs dates ou plusieurs clients)
   est coloré, une couleur par fichier concerné.
 - **Sélections** : par client, par période (date minimale et maximale, ou mois complet),

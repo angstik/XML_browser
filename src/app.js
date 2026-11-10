@@ -30,17 +30,41 @@
     { key: "client", label: "Client", type: "text", title: "PaymentAccountNumber (PartnerID) de l'en-tête du bloc. Un fichier à plusieurs clients est traité comme autant de fichiers." },
     { key: "dateDisp", label: "Date dispense", type: "text", title: "InvoiceDate, renseignée si la ligne contient des enregistrements Dispense à cette date" },
     { key: "dateRef", label: "Date refund", type: "text", title: "InvoiceDate, renseignée si la ligne contient des enregistrements SuccessfulRefund à cette date" },
-    { key: "fileDate", label: "Date fichier", type: "text", title: "Header / FileDate" },
-    { key: "nFlux", label: "Flux", type: "int", title: "InvoiceID distincts des enregistrements Dispense" },
+    { key: "emis", label: "Émission", type: "text", title: "Date et heure d'émission du fichier (Header / FileDate et FileTime), au format AAMMJJ_HHMMSS" },
+    { key: "hash", label: "Empreinte", type: "text", title: "Début de l'empreinte SHA-256 du contenu du fichier. En rouge : contenu identique à un autre fichier chargé." },
+    { key: "nFlux", label: "Flux", type: "int", csvOnly: true, title: "InvoiceID distincts des enregistrements Dispense" },
     { key: "items", label: "Items", type: "int", title: "Somme des Quantity des enregistrements Dispense (1 si Quantity est absent)" },
     { key: "ttc", label: "TTC", type: "money", title: "Somme des TotalAmount des enregistrements Dispense" },
-    { key: "tva", label: "TVA", type: "money", title: "Somme des Tax/Fee dont le Name est TVA" },
-    { key: "ht", label: "HT", type: "money", title: "TTC − TVA" },
+    { key: "tva", label: "TVA", type: "money", csvOnly: true, title: "Somme des Tax/Fee dont le Name est TVA" },
+    { key: "ht", label: "HT", type: "money", csvOnly: true, title: "TTC − TVA" },
     { key: "refN", label: "Refunds", type: "int", title: "Nombre d'enregistrements SuccessfulRefund" },
     { key: "refTtc", label: "Refunds TTC", type: "money", title: "Somme des TotalAmount des enregistrements SuccessfulRefund" },
     { key: "net", label: "Net TTC", type: "money", title: "TTC − Refunds TTC" },
     { key: "check", label: "Contrôle", type: "check", title: "Comparaison des totaux recalculés avec le trailer du bloc" },
   ];
+  // Colonnes affichées : Flux, TVA et HT ne sont que dans l'export CSV, pour tenir dans la largeur de l'écran.
+  const TCOLS = COLS.filter((c) => !c.csvOnly);
+  const HASH_LEN = 10;                       // caractères hexadécimaux affichés (40 bits)
+
+  // Empreinte du contenu brut du fichier : SHA-256 si le navigateur le permet (page servie en https),
+  // sinon FNV-1a 64 bits. La détection des doublons compare l'empreinte entière.
+  async function contentHash(bytes) {
+    if (window.crypto && crypto.subtle) {
+      const d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+      return [...d].map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+    let h = 0xcbf29ce484222325n;
+    for (let i = 0; i < bytes.length; i++) h = BigInt.asUintN(64, (h ^ BigInt(bytes[i])) * 0x100000001b3n);
+    return h.toString(16).padStart(16, "0");
+  }
+
+  // Date et heure d'émission au format court AAMMJJ_HHMMSS.
+  function shortStamp(date, time) {
+    const d = /^\d{2}(\d{2})-(\d{2})-(\d{2})$/.exec(date || "");
+    if (!d) return "";
+    const t = /^(\d{2}):(\d{2}):(\d{2})/.exec(time || "");
+    return d[1] + d[2] + d[3] + (t ? "_" + t[1] + t[2] + t[3] : "");
+  }
 
   const state = {
     source: null,      // { name, entries:[{path,name,depth,getFile}], handle? }
@@ -168,7 +192,7 @@
   // Bloc d'un élément : premier ancêtre ayant un enfant Header. Son en-tête donne le client.
   function blockResolver() {
     const byParent = new Map(), byBlock = new Map();
-    const none = { el: null, partner: "", account: "", fileDate: "", fileId: "" };
+    const none = { el: null, partner: "", account: "", fileDate: "", fileTime: "", fileId: "" };
     function find(start) {
       for (let p = start; p; p = p.parentElement) {
         for (let c = p.firstElementChild; c; c = c.nextElementSibling) {
@@ -176,7 +200,7 @@
           let info = byBlock.get(p);
           if (!info) {
             const hk = kids(c);
-            info = { el: p, partner: txt(hk[PARTNER_TAG]), account: txt(hk[ACCOUNT_TAG]), fileDate: txt(hk.FileDate), fileId: txt(hk.FileID) };
+            info = { el: p, partner: txt(hk[PARTNER_TAG]), account: txt(hk[ACCOUNT_TAG]), fileDate: txt(hk.FileDate), fileTime: txt(hk.FileTime), fileId: txt(hk.FileID) };
             byBlock.set(p, info);
           }
           return info;
@@ -208,7 +232,7 @@
       const key = clientKey(partner, b.account);
       let u = units.get(key);
       if (!u) {
-        u = { key, partner, account: b.account, label: clientLabel(partner, b.account), fileDate: b.fileDate, fileId: b.fileId,
+        u = { key, partner, account: b.account, label: clientLabel(partner, b.account), fileDate: b.fileDate, fileTime: b.fileTime, fileId: b.fileId,
           dates: new Map(), n: { dN: 0, dS: 0, rN: 0, rS: 0 }, exp: { dN: 0, dS: 0, rN: 0, rS: 0 }, has: {}, trailers: 0 };
         units.set(key, u);
       }
@@ -310,7 +334,9 @@
             date: d,
             dateDisp: a.dispN ? (d || NO_DATE) : "",
             dateRef: a.refN ? (d || NO_DATE) : "",
-            fileDate: u.fileDate, fileId: u.fileId,
+            fileDate: u.fileDate, fileTime: u.fileTime, fileId: u.fileId,
+            emis: shortStamp(u.fileDate, u.fileTime),
+            hash: f.hash.slice(0, HASH_LEN), hashFull: f.hash, sameAs: f.sameAs,
             nFlux: a.inv.size + a.noId, items: a.items,
             ttc: a.ttc, tva: a.tva, ht: a.ttc - a.tva, other: a.other,
             refN: a.refN, refTtc: a.refTtc, net: a.ttc - a.refTtc,
@@ -341,13 +367,13 @@
     };
 
     // Analyse un fichier (du disque ou d'une archive) à partir de ses octets.
-    function ingest(entry, bytes) {
+    async function ingest(entry, bytes) {
       if (!looksLikeXml(bytes)) { ignored.push({ path: entry.path, reason: "pas un fichier XML" }); return; }
       const doc = new DOMParser().parseFromString(decode(bytes), "application/xml");
       if (doc.getElementsByTagName("parsererror").length) { ignored.push({ path: entry.path, reason: "XML mal formé" }); return; }
       const res = analyze(doc);
       if (!res) { ignored.push({ path: entry.path, reason: "aucun enregistrement " + REC + " ou " + REF }); return; }
-      files.push({ entry, res, color: -1 });
+      files.push({ entry, res, color: -1, hash: await contentHash(bytes), sameAs: [] });
     }
 
     // Une archive (RAR, ZIP, TAR, GZIP) se comporte comme un répertoire :
@@ -369,7 +395,7 @@
           progress(i, "Archive " + archive.path + " : " + f.name);
           if (!f.bytes) ignored.push({ path: entry.path, reason: f.error ? "non extrait (" + errText(f.error) + ")" : "non extrait de l'archive" });
           else {
-            try { ingest(entry, f.bytes); }
+            try { await ingest(entry, f.bytes); }
             catch (e) { ignored.push({ path: entry.path, reason: "lecture impossible (" + errText(e) + ")" }); }
           }
           await tick();
@@ -390,7 +416,7 @@
         const head = new Uint8Array(await file.slice(0, 512).arrayBuffer());
         const kind = archiveKind(e.name, head);
         if (kind) await ingestArchive(kind, e, file, i);
-        else ingest(e, new Uint8Array(await file.arrayBuffer()));
+        else await ingest(e, new Uint8Array(await file.arrayBuffer()));
       } catch (err) {
         ignored.push({ path: e.path, reason: "lecture impossible (" + errText(err) + ")" });
       }
@@ -402,6 +428,10 @@
     files.sort((a, b) => cmpText(a.entry.path, b.entry.path));
     let nDup = 0;
     for (const f of files) f.color = f.res.nRows > 1 ? nDup++ % NB_COLORS : -1;
+    // Fichiers au contenu identique : chacun connaît les autres.
+    const byHash = new Map();
+    for (const f of files) { const l = byHash.get(f.hash); if (l) l.push(f); else byHash.set(f.hash, [f]); }
+    for (const l of byHash.values()) if (l.length > 1) for (const f of l) f.sameAs = l.filter((o) => o !== f).map((o) => o.entry.path);
 
     state.files = files;
     state.ignored = ignored;
@@ -611,7 +641,7 @@
   function computeView() {
     const q = state.filter.trim().toLowerCase();
     let rows = state.rows;
-    if (q) rows = rows.filter((r) => (r.path + " " + r.date + " " + r.fileDate + " " + r.client).toLowerCase().includes(q));
+    if (q) rows = rows.filter((r) => (r.path + " " + r.date + " " + r.emis + " " + r.hash + " " + r.client).toLowerCase().includes(q));
     const col = COLS.find((c) => c.key === state.sort.key) || COLS[0];
     const dir = state.sort.dir;
     const dateCol = col.key === "dateDisp" || col.key === "dateRef";
@@ -628,7 +658,7 @@
 
   function totals(rows) {
     const t = { nFlux: 0, items: 0, ttc: 0, tva: 0, ht: 0, refN: 0, refTtc: 0, net: 0 };
-    const clients = new Set(), files = new Set(), ko = new Set(), dates = new Set();
+    const clients = new Set(), files = new Set(), ko = new Set(), dates = new Set(), same = new Set();
     for (const r of rows) {
       for (const k in t) t[k] += r[k];
       const unit = r.path + "\u0001" + r.clientKey;   // un fichier à deux clients compte pour deux
@@ -636,7 +666,9 @@
       if (r.unit.partner || r.unit.account) clients.add(r.clientKey);
       dates.add(r.date);
       if (r.check.state === "ko") ko.add(unit);
+      if (r.sameAs.length) same.add(r.path);
     }
+    t.same = same.size;
     t.clients = clients.size; t.files = files.size; t.dates = dates.size; t.ko = ko.size;
     return t;
   }
@@ -685,7 +717,7 @@
 
     // En-tête
     const trh = el("tr");
-    for (const c of COLS) {
+    for (const c of TCOLS) {
       const th = el("th", "t-" + c.type);
       th.scope = "col";
       if (state.sort.key === c.key) th.setAttribute("aria-sort", state.sort.dir > 0 ? "ascending" : "descending");
@@ -710,7 +742,7 @@
     state.view.forEach((r, i) => {
       const tr = el("tr", r.dup ? "dup dc" + r.color : "");
       tr.dataset.i = i;
-      for (const c of COLS) {
+      for (const c of TCOLS) {
         const td = el("td", "t-" + c.type + " c-" + c.key, c.key === "path" ? "" : cellText(c, r));
         if (c.key === "path") {
           // Le nom se tronque, les étiquettes de doublon restent toujours visibles.
@@ -728,7 +760,11 @@
           td.classList.add("zero");
         }
         if (c.key === "ttc" && r.bad) td.title = r.bad + " montant(s) illisible(s) non additionné(s)";
-        if (c.key === "tva" && r.other) td.title = "Autres taxes non comptées en TVA : " + money(r.other);
+        if (c.key === "hash") {
+          td.title = r.hashFull + (r.sameAs.length ? "\nContenu identique à :\n" + r.sameAs.join("\n") : "");
+          if (r.sameAs.length) { td.classList.add("hash-dup"); td.textContent = ""; td.appendChild(el("span", null, r.hash)); }
+        }
+        if (c.key === "emis" && r.fileTime) td.title = r.fileDate + " " + r.fileTime;
         tr.appendChild(td);
       }
       frag.appendChild(tr);
@@ -738,15 +774,16 @@
     // Total
     const t = totals(state.view);
     const trf = el("tr");
-    for (const c of COLS) {
+    for (const c of TCOLS) {
       let text = "";
       if (c.key === "path") text = state.short ? plural(t.files, "fichier", "fichiers") : "Total : " + plural(t.files, "fichier", "fichiers");
       else if (c.key === "client") text = plural(t.clients, "client", "clients");
       else if (c.type === "int") text = fmtInt.format(t[c.key]);
       else if (c.type === "money") text = money(t[c.key]);
       else if (c.type === "check") text = t.ko ? plural(t.ko, "écart", "écarts") : "";
+      else if (c.key === "hash") text = t.same ? plural(t.same, "doublon", "doublons") : "";
       const td = el("td", "t-" + c.type, text);
-      if (c.type === "check" && t.ko) td.classList.add("chk-ko");
+      if ((c.type === "check" && t.ko) || (c.key === "hash" && t.same)) td.classList.add("chk-ko");
       trf.appendChild(td);
     }
     $("tfoot").replaceChildren(trf);
@@ -812,6 +849,7 @@
     sum.appendChild(summaryItem("Client", r.client, r.nClients > 1 ? "hl" : ""));
     const kind = r.dateDisp && r.dateRef ? "Dispense + refund" : r.dateRef ? "Refund" : "Dispense";
     sum.appendChild(summaryItem(kind, r.date || NO_DATE, r.nDates > 1 ? "hl" : ""));
+    sum.appendChild(summaryItem("Émis le", (r.fileDate || NO_DATE) + (r.fileTime ? " à " + r.fileTime : "")));
     sum.appendChild(summaryItem("Flux", fmtInt.format(r.nFlux)));
     sum.appendChild(summaryItem("Items", fmtInt.format(r.items)));
     sum.appendChild(summaryItem("TTC", money(r.ttc)));
@@ -820,6 +858,9 @@
     sum.appendChild(summaryItem("Refunds", fmtInt.format(r.refN) + " (" + money(r.refTtc) + ")"));
     sum.appendChild(summaryItem("Net TTC", money(r.net)));
     sum.appendChild(summaryItem("Contrôle", cellText(COLS[COLS.length - 1], r), r.check.state === "ko" ? "red" : ""));
+    const hashItem = summaryItem("Empreinte", r.hash + (r.sameAs.length ? " (identique à " + plural(r.sameAs.length, "fichier", "fichiers") + ")" : ""), r.sameAs.length ? "red" : "");
+    hashItem.title = r.hashFull + (r.sameAs.length ? "\n" + r.sameAs.join("\n") : "");
+    sum.appendChild(hashItem);
 
     if (!viewer) {
       viewer = window.XmlViewer.create($("editor"), {
@@ -1045,7 +1086,7 @@
         case "int": return num(r[c.key], false);
         case "money": return num(r[c.key] / 100, true);
         case "check": return q(r.check.state === "ok" ? "OK" : r.check.details.join(" | "));
-        default: return q(r[c.key]);
+        default: return q(c.key === "hash" ? r.hashFull : r[c.key]);
       }
     };
     const lines = [COLS.map((c) => q(c.label)).join(";")];
