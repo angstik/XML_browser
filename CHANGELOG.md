@@ -14,6 +14,8 @@ son entrée ici.
 - Colonnes Flux, TVA et HT retirées du tableau pour tenir dans la largeur de l'écran ; elles
   restent dans l'export CSV, qui donne aussi l'empreinte complète.
 - Visionneuse : la date et l'heure d'émission, et l'empreinte, figurent dans l'en-tête.
+- Intégration continue : le workflow tourne sur Ubuntu 24.04. `ubuntu-latest` est passé à
+  Ubuntu 26.04, où le navigateur de test (Playwright 1.56) ne s'installe pas.
 
 ## v04 (2026-10-09)
 
