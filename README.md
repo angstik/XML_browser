@@ -28,10 +28,13 @@ Application en ligne : <https://angstik.github.io/XML_browser/>
   principal, jours manquants (global et par client), fichiers identiques, flux présents dans
   plusieurs fichiers ou répétés, et graphe par jour avec enveloppe prévisionnelle (tendance
   par client corrigée du jour de la semaine) et zones hors enveloppe.
+- **Export des fichiers** : les fichiers retenus, au format XML d'origine, en ZIP ou dans un
+  répertoire, selon des règles à cocher (sélection, mois principal, doublons, dispenses ou
+  refunds seulement, fichiers en écart) ; trailer recalculé et rapport CSV.
 - **Visionneuse XML** en lecture seule : coloration, recherche, repli par élément ou par niveau.
 
 Clavier : `↑` `↓` parcourir, `Entrée` ouvrir, `Échap` revenir, `/` filtrer, `C` client,
-`D` période, `S` synthèse, `A` analyse.
+`D` période, `S` synthèse, `A` analyse, `E` export.
 
 ## Confidentialité
 

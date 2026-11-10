@@ -10,6 +10,7 @@ import { makeRar } from "./make-rar.mjs";
 import { makeZip, makeTar } from "./make-archives.mjs";
 import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
+import { execSync } from "node:child_process";
 
 const rec = (tag, id, date, amount, tva = 0) => `
       <${tag}><PTxID>${id}</PTxID><TotalAmount>${amount.toFixed(2)}</TotalAmount>
@@ -183,7 +184,7 @@ try {
   await page.focus("#tableWrap");
   await page.keyboard.press("a");
   await page.waitForSelector("#aViz svg");
-  assert.equal(await page.$$eval(".ana-status", (p) => p.length), 4);
+  assert.equal(await page.$$eval(".ana-status", (p) => p.length), 5);
   assert.match(await page.textContent("#aMonths"), /janvier 2026 \(principal\)/);
   assert.match(await page.textContent("#aSum"), /Doublons : 0 fichier identique/);
   assert.ok(await page.$$eval("#aViz .viz-fc-line", (l) => l.length) >= 1, "courbe de prévision");
@@ -191,6 +192,25 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForSelector("#anaScreen", { state: "hidden" });
   step("écran Analyse");
+
+  // Export des fichiers : refunds exclus, trailer recalculé, au format d'origine.
+  if (await page.isVisible("#selClear")) await page.click("#selClear");   // toute la sélection
+  await page.focus("#tableWrap");
+  await page.keyboard.press("e");
+  await page.waitForSelector("#expDialog[open]");
+  await page.check("input[name=xType][value=dispense]");
+  const [zipDl] = await Promise.all([page.waitForEvent("download"), page.click("#xZip")]);
+  await page.waitForFunction(() => /exporté/.test(document.getElementById("xResult").textContent));
+  const zipPath = join(dir, "export.zip");
+  await zipDl.saveAs(zipPath);
+  const listing = execSync("unzip -Z1 " + zipPath).toString().trim().split("\n").sort();
+  assert.deepEqual(listing, ["a.xml", "b.xml", "c.rar/interne/archive_c.xml", "rapport-export.csv"]);
+  const a2 = execSync("unzip -p " + zipPath + " a.xml").toString();
+  assert.ok(!a2.includes("<SuccessfulRefund>"), "refunds retirés");
+  assert.match(a2, /<TotalSuccessfulRefundRecords>0<\/TotalSuccessfulRefundRecords>/, "trailer recalculé");
+  assert.equal(execSync("unzip -p " + zipPath + " b.xml").toString(), readFileSync(join(lot, "b.xml"), "utf8"), "fichier sans refund exporté à l'identique");
+  await page.click("#xClose");
+  step("export des fichiers filtrés (ZIP)");
 
   // Version et mise à jour.
   const version = (await page.textContent("#version")).trim();

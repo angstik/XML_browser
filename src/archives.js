@@ -1,6 +1,7 @@
 // Lecture des archives ZIP, TAR et GZIP (dont .tar.gz), sans bibliothèque :
 // le format est décodé ici, la décompression est celle du navigateur (DecompressionStream).
-// Exposé en global : window.Archives = { zip, tar, gz, isTar }
+// Écriture : zipWrite(files) fabrique une archive ZIP (deflate) à partir de [{ name, data }].
+// Exposé en global : window.Archives = { zip, tar, gz, isTar, zipWrite }
 // Chaque lecteur offre each(buffer, onFile, archiveName) et one(buffer, rawName).
 (function () {
   "use strict";
@@ -184,5 +185,49 @@
     },
   };
 
-  window.Archives = { zip, tar, gz, isTar };
+  // ---- Écriture ZIP --------------------------------------------------------
+  async function deflate(bytes) {
+    if (typeof CompressionStream !== "function") return null;
+    try {
+      const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    } catch (e) { return null; }                                  // format non géré : fichier stocké
+  }
+
+  async function zipWrite(files) {
+    const enc = new TextEncoder();
+    const now = new Date();
+    const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+    const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+    const parts = [], central = [];
+    let offset = 0;
+    for (const f of files) {
+      const name = enc.encode(f.name);
+      const packed = await deflate(f.data);
+      const store = !packed || packed.length >= f.data.length;
+      const body = store ? f.data : packed;
+      const crc = crc32(f.data);
+      const head = new DataView(new ArrayBuffer(30));
+      head.setUint32(0, 0x04034b50, true); head.setUint16(4, 20, true); head.setUint16(6, 0x0800, true);
+      head.setUint16(8, store ? 0 : 8, true); head.setUint16(10, dosTime, true); head.setUint16(12, dosDate, true);
+      head.setUint32(14, crc, true); head.setUint32(18, body.length, true); head.setUint32(22, f.data.length, true);
+      head.setUint16(26, name.length, true); head.setUint16(28, 0, true);
+      parts.push(new Uint8Array(head.buffer), name, body);
+      const cd = new DataView(new ArrayBuffer(46));
+      cd.setUint32(0, 0x02014b50, true); cd.setUint16(4, 20, true); cd.setUint16(6, 20, true); cd.setUint16(8, 0x0800, true);
+      cd.setUint16(10, store ? 0 : 8, true); cd.setUint16(12, dosTime, true); cd.setUint16(14, dosDate, true);
+      cd.setUint32(16, crc, true); cd.setUint32(20, body.length, true); cd.setUint32(24, f.data.length, true);
+      cd.setUint16(28, name.length, true); cd.setUint32(42, offset, true);
+      central.push(new Uint8Array(cd.buffer), name);
+      offset += 30 + name.length + body.length;
+      if (offset > 0xffffffff) throw new Error("export trop volumineux pour un seul ZIP (plus de 4 Go)");
+    }
+    const cdSize = central.reduce((n, p) => n + p.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: "application/zip" });
+  }
+
+  window.Archives = { zip, tar, gz, isTar, zipWrite };
 })();

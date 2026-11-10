@@ -45,6 +45,7 @@
     <button id="openSynth" type="button" title="Raccourci : S">Synthèse par client</button>
     <button id="openAnalysis" type="button" title="Contrôles de cohérence. Raccourci : A">Analyse</button>
     <button id="copyNames" type="button" title="Copie dans le presse-papiers les noms des fichiers affichés, séparés par des virgules">Copier les noms</button>
+    <button id="exportFiles" type="button" title="Exporter les fichiers retenus, au format XML d'origine. Raccourci : E">Exporter les fichiers</button>
     <button id="csv" type="button">Exporter en CSV</button>
     <span id="synth" class="synth" aria-live="polite"></span>
   </div>
@@ -81,6 +82,7 @@
     <span><kbd>D</kbd> période</span>
     <span><kbd>S</kbd> synthèse</span>
     <span><kbd>A</kbd> analyse</span>
+    <span><kbd>E</kbd> export</span>
     <span id="count" class="count"></span>
   </footer>
 </section>
@@ -142,6 +144,38 @@
     <span><kbd>Échap</kbd> retour</span>
   </footer>
 </section>
+
+<dialog id="expDialog" class="xdialog" aria-labelledby="xTitle">
+  <h2 id="xTitle">Exporter les fichiers</h2>
+  <p class="x-note">Les fichiers retenus sont écrits au format XML d'origine (même structure, même encodage). Un fichier non modifié est exporté à l'identique ; un fichier filtré perd les enregistrements écartés.</p>
+  <fieldset>
+    <legend>Fichiers</legend>
+    <label><input type="checkbox" id="xSel" checked> <span id="xSelLabel">Ne garder que la sélection affichée</span></label>
+    <label><input type="checkbox" id="xKo"> Exclure les fichiers en écart avec leur trailer</label>
+    <label><input type="checkbox" id="xEmpty" checked> Ne pas exporter un fichier devenu vide</label>
+  </fieldset>
+  <fieldset>
+    <legend>Enregistrements</legend>
+    <label><input type="checkbox" id="xMain"> <span id="xMainLabel">Ne garder que le mois principal</span></label>
+    <label><input type="checkbox" id="xDup"> Supprimer les doublons : fichiers identiques, flux (InvoiceID) déjà exportés ou répétés</label>
+    <div class="x-radio" role="radiogroup" aria-label="Types d'enregistrement">
+      <label><input type="radio" name="xType" value="all" checked> Dispenses et refunds</label>
+      <label><input type="radio" name="xType" value="dispense"> Exclure les refunds</label>
+      <label><input type="radio" name="xType" value="refund"> Ne garder que les refunds</label>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Contenu</legend>
+    <label><input type="checkbox" id="xTrailer" checked> Recalculer le trailer des fichiers modifiés (nombres et sommes)</label>
+    <label><input type="checkbox" id="xReport" checked> Joindre un rapport (rapport-export.csv)</label>
+  </fieldset>
+  <p id="xResult" class="x-result" aria-live="polite"></p>
+  <div class="x-actions">
+    <button id="xZip" type="button" class="primary">Télécharger un ZIP</button>
+    <button id="xDir" type="button">Enregistrer dans un répertoire…</button>
+    <button id="xClose" type="button">Fermer</button>
+  </div>
+</dialog>
 
 <div id="toast" class="toast" hidden><span id="toastText"></span><button id="toastAction" type="button" hidden></button></div>
 

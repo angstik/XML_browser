@@ -352,6 +352,9 @@ i.k-line.s2 { background: var(--line-2); }
 .ana-table tbody tr { cursor: default; }
 .ana-table tbody td { background: var(--surface); }
 .ana-table tr.warn td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.ana-table tr.err td { color: var(--red); }
+.ana-table tr.err td:first-child { box-shadow: inset 3px 0 0 var(--red); font-weight: 600; }
+.ana-status.err { border-color: var(--red); background: color-mix(in srgb, var(--red) 9%, var(--surface)); color: var(--red); }
 .ana-table tr.main td { font-weight: 650; }
 .ana-table td.ana-none { color: var(--muted); }
 .ana-ctrl { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0; }
@@ -370,6 +373,19 @@ i.k-line.s2 { background: var(--line-2); }
 .viz-tip-fc.out { color: var(--flag); }
 .viz-table tr.flag td { background: color-mix(in srgb, var(--flag) 10%, var(--surface)); }
 .viz-export { --fc: #1b7f4b; --flag: #c4122f; }
+
+/* Dialogue d'export */
+.xdialog { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); padding: 18px 22px; width: min(640px, calc(100vw - 32px)); }
+.xdialog::backdrop { background: rgba(10, 20, 30, .35); }
+.xdialog h2 { font-size: 17px; margin: 0 0 6px; }
+.xdialog fieldset { border: 1px solid var(--line); border-radius: 6px; margin: 10px 0; padding: 8px 12px 10px; }
+.xdialog legend { font-weight: 650; font-size: 13px; color: var(--muted); padding: 0 4px; }
+.xdialog label { display: flex; gap: 8px; align-items: flex-start; margin: 5px 0; }
+.xdialog input { margin-top: 3px; }
+.x-radio { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 4px; }
+.x-note { color: var(--muted); font-size: 13px; margin: 0 0 4px; }
+.x-result { min-height: 1.4em; font-weight: 600; }
+.x-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 
 @media (prefers-color-scheme: dark) {
   .viz-root { --fc: #5ccb8f; --flag: #ff7088; }

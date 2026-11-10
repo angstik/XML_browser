@@ -180,7 +180,7 @@
     return { tva, other };
   }
   function newAgg() {
-    return { inv: new Set(), noId: 0, dispN: 0, items: 0, ttc: 0, tva: 0, other: 0, refN: 0, refTtc: 0, refTva: 0, bad: 0 };
+    return { inv: new Set(), noId: 0, dispN: 0, items: 0, ttc: 0, tva: 0, other: 0, refN: 0, refTtc: 0, refTva: 0, refInv: new Set(), bad: 0 };
   }
 
   const clientKey = (partner, account) => partner + "\u0001" + account;
@@ -257,6 +257,8 @@
       const k = kids(refs[i]);
       const u = unitFor(refs[i], k), a = agg(u, txt(k[DATE_TAG]));
       a.refN++; u.n.rN++;
+      const rid = txt(k.InvoiceID);
+      if (rid) a.refInv.add(rid);
       const t = cents(txt(k.TotalAmount));
       if (t === null) a.bad++; else { a.refTtc += t; u.n.rS += t; }
       a.refTva += taxes(refs[i]).tva;
@@ -1129,10 +1131,12 @@
           // Flux répétés dans un même fichier : plus d'enregistrements que d'InvoiceID distincts.
           const rep = a.dispN - n;
           if (rep > 0) repeated.push({ path: f.entry.path, client: u.label, date: d, n: rep });
-          a.inv.forEach((id) => {
-            let l = ids.get(id);
-            if (!l) { l = []; ids.set(id, l); }
-            l.push({ f, client: u.label, date: d });
+          // Identifiants des dispenses et des refunds, suivis séparément.
+          for (const [set, kind] of [[a.inv, "d"], [a.refInv, "r"]]) set.forEach((id) => {
+            const key = kind + "\u0001" + id;
+            let l = ids.get(key);
+            if (!l) { l = []; ids.set(key, l); }
+            l.push({ f, client: u.label, date: d, kind });
           });
         });
       }
@@ -1152,8 +1156,8 @@
       files.sort((a, b) => cmpText(a.entry.path, b.entry.path));
       const key = files.map((f) => f.entry.path).join("\u0001");
       let s = shared.get(key);
-      if (!s) { s = { files: files.map((f) => f.entry.path), n: 0, dates: new Set(), clients: new Set() }; shared.set(key, s); }
-      s.n++;
+      if (!s) { s = { files: files.map((f) => f.entry.path), n: 0, r: 0, dates: new Set(), clients: new Set() }; shared.set(key, s); }
+      if (l[0].kind === "d") s.n++; else s.r++;
       for (const x of l) { s.dates.add(x.date); s.clients.add(x.client); }
     });
 
@@ -1202,7 +1206,8 @@
     wrap.appendChild(table);
     return wrap;
   }
-  const status = (ok, text) => { const p = el("p", "ana-status " + (ok ? "ok" : "warn")); p.textContent = text; return p; };
+  // ok : vert ; sinon orange, ou rouge si level vaut "err".
+  const status = (ok, text, level) => { const p = el("p", "ana-status " + (ok ? "ok" : level || "warn")); p.textContent = text; return p; };
   const listText = (set, max = 4) => { const a = [...set].sort(cmpText); return a.length > max ? a.slice(0, max).join(", ") + " et " + (a.length - max) + " autre(s)" : a.join(", "); };
 
   function renderAnalysis() {
@@ -1223,6 +1228,11 @@
       const cd = [...c.days.keys()].sort();
       return cd.length ? { c, first: cd[0], last: cd[cd.length - 1], ...missingDays(cd[0], cd[cd.length - 1], new Set(cd)) } : null;
     }).filter(Boolean);
+    // Jours manquants du 1er au dernier jour du mois principal : global et par client.
+    const [mFirst, mLast] = monthBounds(A.main);
+    const inMain = (d) => d >= mFirst && d <= mLast;
+    const mainGlob = missingDays(mFirst, mLast, new Set(A.days.keys()));
+    const mainClients = [...A.clients.values()].map((c) => ({ c, ...missingDays(mFirst, mLast, new Set(c.days.keys())) }));
     const fcm = A.fc[ana.measure];
     const zonesOf = (flags, off) => Analysis.ranges(flags.map((f) => f.t)).map((r) => ({ from: r.from, to: r.to, flags: flags.filter((f) => f.t >= r.from && f.t <= r.to), off }));
     const allZones = [];
@@ -1233,9 +1243,11 @@
 
     const sum = section("aSum", "Résumé");
     sum.appendChild(status(outN === 0, "Mois principal : " + monthName(A.main) + ", " + plural(mainM.n, "flux", "flux") + ". Hors de ce mois : " + plural(outN, "flux", "flux") + ", " + fmtE(outHT) + " € HT."));
+    const mainGapClients = mainClients.filter((g) => g.missing);
+    sum.appendChild(status(!mainGlob.missing && !mainGapClients.length, "Mois principal, du " + dayLabel(mFirst) + " au " + dayLabel(mLast) + " : " + plural(mainGlob.missing, "jour manquant", "jours manquants") + " tous clients ; " + plural(mainGapClients.length, "client", "clients") + " avec des jours manquants" + (mainGapClients.length ? " (" + listText(new Set(mainGapClients.map((g) => g.c.label))) + ")" : "") + ".", "err"));
     sum.appendChild(status(glob.missing === 0 && clientGaps.every((g) => !g.missing), "Jours : du " + dayLabel(A.first) + " au " + dayLabel(A.last) + ", " + plural(glob.missing, "jour manquant", "jours manquants") + " ; " + plural(clientGaps.filter((g) => g.missing).length, "client", "clients") + " avec des jours manquants."));
-    const sharedN = A.shared.reduce((n, s) => n + s.n, 0);
-    sum.appendChild(status(!A.identical.length && !sharedN && !A.repeated.length, "Doublons : " + plural(A.identical.reduce((n, g) => n + g.length - 1, 0), "fichier identique", "fichiers identiques") + " à un autre, " + plural(sharedN, "flux présent", "flux présents") + " dans plusieurs fichiers, " + plural(A.repeated.reduce((n, r) => n + r.n, 0), "flux répété", "flux répétés") + " dans un même fichier."));
+    const sharedN = A.shared.reduce((n, s) => n + s.n, 0), sharedR = A.shared.reduce((n, s) => n + s.r, 0);
+    sum.appendChild(status(!A.identical.length && !sharedN && !sharedR && !A.repeated.length, "Doublons : " + plural(A.identical.reduce((n, g) => n + g.length - 1, 0), "fichier identique", "fichiers identiques") + " à un autre, " + plural(sharedN, "flux", "flux") + " et " + plural(sharedR, "refund", "refunds") + " présents dans plusieurs fichiers, " + plural(A.repeated.reduce((n, r) => n + r.n, 0), "flux répété", "flux répétés") + " dans un même fichier.", "err"));
     sum.appendChild(status(!allZones.length, "Prévision (" + (ana.measure === "dHT" ? "valeur HT" : "nombre") + ") : " + plural(allZones.length, "zone douteuse", "zones douteuses") + " hors de l'enveloppe à ±" + fmtTick.format(Analysis.K) + " écarts robustes."));
     if (A.undated) sum.appendChild(status(false, plural(A.undated, "enregistrement", "enregistrements") + " sans date de facture valide, exclus de l'analyse."));
     if (A.kept.length < state.files.length) sum.appendChild(el("p", "ana-note", "Les fichiers identiques ne sont comptés qu'une fois dans les analyses ci-dessous."));
@@ -1257,11 +1269,16 @@
     // 2. Couverture des jours
     const sd = section("aDays", "Couverture des jours");
     sd.appendChild(el("p", "ana-note", "Un jour est présent s'il porte au moins un enregistrement (dispense ou refund). Tous clients : du " + dayLabel(A.first) + " au " + dayLabel(A.last) + ", " + plural(glob.total, "jour", "jours") + "."));
-    sd.appendChild(anaTable([{ label: "Jours manquants" }, { label: "Durée", num: true }], glob.ranges.map((r) => ({ cls: "warn", cells: [rangeLabel(r), plural(r.n, "jour", "jours")] })), { empty: "Aucun jour manquant." }));
+    sd.appendChild(el("h3", null, "Mois principal, du " + dayLabel(mFirst) + " au " + dayLabel(mLast)));
+    const mainRows = mainGlob.ranges.map((r) => ({ cls: "err", cells: ["Tous les clients", rangeLabel(r), plural(r.n, "jour", "jours")] }));
+    mainClients.sort((a, b) => cmpText(a.c.label, b.c.label)).forEach((g) => g.ranges.forEach((r) => mainRows.push({ cls: "err", cells: [g.c.label, rangeLabel(r), plural(r.n, "jour", "jours")] })));
+    sd.appendChild(anaTable([{ label: "Client" }, { label: "Jours manquants" }, { label: "Durée", num: true }], mainRows, { empty: "Aucun jour manquant dans le mois principal." }));
+    sd.appendChild(el("h3", null, "Tous clients, du premier au dernier jour (en rouge : dans le mois principal)"));
+    sd.appendChild(anaTable([{ label: "Jours manquants" }, { label: "Durée", num: true }], glob.ranges.map((r) => ({ cls: inMain(r.from) || inMain(r.to) ? "err" : "warn", cells: [rangeLabel(r), plural(r.n, "jour", "jours")] })), { empty: "Aucun jour manquant." }));
     sd.appendChild(el("h3", null, "Par client (entre son premier et son dernier jour)"));
     sd.appendChild(anaTable(
       [{ label: "Client" }, { label: "Premier jour" }, { label: "Dernier jour" }, { label: "Jours", num: true }, { label: "Manquants", num: true }, { label: "Écarts" }],
-      clientGaps.sort((a, b) => cmpText(a.c.label, b.c.label)).map((g) => ({ cls: g.missing ? "warn" : "", cells: [g.c.label, dayLabel(g.first), dayLabel(g.last), fmtN(g.total), fmtN(g.missing), g.ranges.map(rangeLabel).join(" ; ")] }))));
+      clientGaps.sort((a, b) => cmpText(a.c.label, b.c.label)).map((g) => ({ cls: g.ranges.some((r) => inMain(r.from) || inMain(r.to)) ? "err" : g.missing ? "warn" : "", cells: [g.c.label, dayLabel(g.first), dayLabel(g.last), fmtN(g.total), fmtN(g.missing), g.ranges.map(rangeLabel).join(" ; ")] }))));
 
     // 3. Doublons
     const sdup = section("aDups", "Doublons");
@@ -1270,14 +1287,14 @@
       A.identical.map((g) => {
         const cl = new Set(), ds = new Set();
         g[0].res.units.forEach((u) => { cl.add(u.label); u.dates.forEach((_a, d) => ds.add(d)); });
-        return { cls: "warn", cells: [g[0].hash.slice(0, HASH_LEN), g.map((f) => f.entry.path).join(", "), listText(cl), listText(ds, 6)] };
+        return { cls: "err", cells: [g[0].hash.slice(0, HASH_LEN), g.map((f) => f.entry.path).join(", "), listText(cl), listText(ds, 6)] };
       }), { empty: "Aucun fichier identique." }));
-    sdup.appendChild(el("h3", null, "Flux (InvoiceID) présents dans plusieurs fichiers"));
-    sdup.appendChild(anaTable([{ label: "Fichiers" }, { label: "Flux communs", num: true }, { label: "Clients" }, { label: "Jours" }],
-      A.shared.sort((a, b) => b.n - a.n).map((s) => ({ cls: "warn", cells: [s.files.join(", "), fmtN(s.n), listText(s.clients), listText(s.dates, 6)] })), { empty: "Aucun flux commun à plusieurs fichiers." }));
+    sdup.appendChild(el("h3", null, "Flux et refunds (même InvoiceID) présents dans plusieurs fichiers"));
+    sdup.appendChild(anaTable([{ label: "Fichiers" }, { label: "Flux communs", num: true }, { label: "Refunds communs", num: true }, { label: "Clients" }, { label: "Jours" }],
+      A.shared.sort((a, b) => b.n + b.r - a.n - a.r).map((s) => ({ cls: "err", cells: [s.files.join(", "), fmtN(s.n), fmtN(s.r), listText(s.clients), listText(s.dates, 6)] })), { empty: "Aucun enregistrement commun à plusieurs fichiers." }));
     sdup.appendChild(el("h3", null, "Flux répétés dans un même fichier"));
     sdup.appendChild(anaTable([{ label: "Fichier" }, { label: "Client" }, { label: "Jour" }, { label: "Répétitions", num: true }],
-      A.repeated.map((r) => ({ cls: "warn", cells: [r.path, r.client, dayLabel(r.date), fmtN(r.n)] })), { empty: "Aucun flux répété." }));
+      A.repeated.map((r) => ({ cls: "err", cells: [r.path, r.client, dayLabel(r.date), fmtN(r.n)] })), { empty: "Aucun flux répété." }));
 
     // 4. Prévision
     const sf = section("aFc", "Graphe et enveloppe prévisionnelle");
@@ -1353,6 +1370,227 @@
     $("tableWrap").scrollTop = savedScroll;
     select(state.sel, true);
     $("tableWrap").focus();
+  }
+
+  // ---- Export des fichiers retenus, au format d'entrée ----------------------
+  // Chaque fichier est réécrit en XML, dans son encodage d'origine. Les enregistrements écartés
+  // sont retirés du texte d'origine, le reste du fichier est conservé tel quel ; un fichier non
+  // modifié est exporté octet pour octet.
+  const RECORD_RE = new RegExp("<(" + REC + "|" + REF + ")(?:\\s[^>]*)?(?:/>|>[\\s\\S]*?</\\1\\s*>)", "g");
+  const TRAILER_RE = /<(trailer|Trailer)(?:\s[^>]*)?>[\s\S]*?<\/\1\s*>/g;
+  const TRAILER_FIELDS = [["TotalDispenseRecords", "dN", false], ["SumDispenseTotalAmount", "dS", true], ["TotalSuccessfulRefundRecords", "rN", false], ["SumSuccessfulRefundTotalAmount", "rS", true]];
+
+  // Encode le texte comme l'original : même marque d'ordre des octets, même encodage déclaré.
+  function encodeLike(text, original) {
+    const b = original;
+    if (b[0] === 0xff && b[1] === 0xfe || b[0] === 0xfe && b[1] === 0xff) {
+      const le = b[0] === 0xff, out = new Uint8Array(2 + text.length * 2);
+      out[0] = b[0]; out[1] = b[1];
+      for (let i = 0; i < text.length; i++) { const c = text.charCodeAt(i); out[2 + 2 * i + (le ? 0 : 1)] = c & 0xff; out[2 + 2 * i + (le ? 1 : 0)] = c >> 8; }
+      return out;
+    }
+    const m = /^\s*<\?xml[^>]*encoding\s*=\s*["']([\w.:-]+)["']/i.exec(text);
+    if (m && /^(iso-?8859-1|iso-?8859-15|latin-?1|windows-1252|cp1252|us-ascii|ascii)$/i.test(m[1])) {
+      const max = /ascii/i.test(m[1]) ? 0x7f : 0xff;
+      const out = [];
+      for (const ch of text) {
+        const c = ch.codePointAt(0);
+        if (c <= max) out.push(c);
+        else for (const x of new TextEncoder().encode("&#x" + c.toString(16) + ";")) out.push(x);   // caractère hors de l'encodage
+      }
+      return Uint8Array.from(out);
+    }
+    const body = new TextEncoder().encode(text);
+    if (b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) { const out = new Uint8Array(body.length + 3); out.set([0xef, 0xbb, 0xbf]); out.set(body, 3); return out; }
+    return body;
+  }
+
+  // Étend une plage à retirer à la ligne entière quand l'élément y est seul (pas de ligne vide laissée).
+  function lineRange(text, start, end) {
+    let s = start, e = end;
+    while (s > 0 && (text[s - 1] === " " || text[s - 1] === "\t")) s--;
+    let t = e;
+    while (t < text.length && (text[t] === " " || text[t] === "\t")) t++;
+    if ((s === 0 || text[s - 1] === "\n") && (text[t] === "\n" || text[t] === "\r")) {
+      e = text[t] === "\r" && text[t + 1] === "\n" ? t + 2 : t + 1;
+      return [s, e];
+    }
+    return [start, end];
+  }
+
+  function formatAmount(c, like) {
+    const dec = /[.,](\d+)\s*$/.exec(like);
+    const s = (c / 100).toFixed(dec ? Math.max(2, dec[1].length) : 2);
+    return /,/.test(like) ? s.replace(".", ",") : s;
+  }
+
+  // Filtre un fichier selon les règles. ctx : { opts, main, seen } partagé entre les fichiers.
+  async function filterFile(f, ctx) {
+    const { opts } = ctx;
+    const bytes = await bytesOf(f.entry);
+    const text = decode(bytes);
+    const doc = new DOMParser().parseFromString(text, "application/xml");
+    const dom = { [REC]: doc.getElementsByTagName(REC), [REF]: doc.getElementsByTagName(REF) };
+    const blockOf = blockResolver();
+    const removed = { type: 0, sel: 0, main: 0, dup: 0 };
+    const kept = { dN: 0, rN: 0 };
+    const stats = new Map();                   // bloc → totaux des enregistrements gardés
+    const whole = { dN: 0, dS: 0, rN: 0, rS: 0 };
+    const edits = [];
+    const k = { [REC]: 0, [REF]: 0 };
+    let m;
+    RECORD_RE.lastIndex = 0;
+    while ((m = RECORD_RE.exec(text))) {
+      const tag = m[1];
+      const el = dom[tag][k[tag]++];
+      if (!el) return { error: "structure du fichier non reconnue" };
+      const kk = kids(el);
+      const date = txt(kk[DATE_TAG]), id = txt(kk.InvoiceID);
+      const b = blockOf(el);
+      const ck = clientKey(txt(kk[PARTNER_TAG]) || b.partner, b.account);
+      if (b.el && !stats.has(b.el)) stats.set(b.el, { dN: 0, dS: 0, rN: 0, rS: 0 });
+      let reason = null;
+      if ((opts.type === "dispense" && tag === REF) || (opts.type === "refund" && tag === REC)) reason = "type";
+      else if (opts.sel && ((state.client !== null && ck !== state.client) || !inRange(date))) reason = "sel";
+      else if (opts.main && date.slice(0, 7) !== ctx.main) reason = "main";
+      else if (opts.dup && id && ctx.seen.has(tag + "\u0001" + id)) reason = "dup";
+      if (reason) {
+        removed[reason]++;
+        edits.push([...lineRange(text, m.index, m.index + m[0].length), ""]);
+        continue;
+      }
+      if (id) ctx.seen.add(tag + "\u0001" + id);
+      const amount = cents(txt(kk.TotalAmount)) || 0;
+      const isD = tag === REC;
+      kept[isD ? "dN" : "rN"]++;
+      for (const t of b.el ? [stats.get(b.el), whole] : [whole]) {
+        if (isD) { t.dN++; t.dS += amount; } else { t.rN++; t.rS += amount; }
+      }
+    }
+    if (k[REC] !== dom[REC].length || k[REF] !== dom[REF].length) return { error: "structure du fichier non reconnue" };
+
+    const changed = edits.length > 0;
+    let trailerDone = false;
+    if (changed && opts.trailer) {
+      const trailers = doc.getElementsByTagName("trailer").length ? doc.getElementsByTagName("trailer") : doc.getElementsByTagName("Trailer");
+      let i = 0;
+      TRAILER_RE.lastIndex = 0;
+      while ((m = TRAILER_RE.exec(text))) {
+        const tEl = trailers[i++];
+        if (!tEl) break;
+        const b = blockOf(tEl);
+        const t = b.el ? stats.get(b.el) || { dN: 0, dS: 0, rN: 0, rS: 0 } : whole;
+        let out = m[0];
+        for (const [tagName, key, money] of TRAILER_FIELDS) {
+          out = out.replace(new RegExp("(<" + tagName + "(?:\\s[^>]*)?>)([^<]*)(</" + tagName + "\\s*>)"), (_x, a, v, c) => a + (money ? formatAmount(t[key], v) : String(t[key])) + c);
+        }
+        if (out !== m[0]) { edits.push([m.index, m.index + m[0].length, out]); trailerDone = true; }
+      }
+    }
+    let data = bytes;
+    if (changed) {
+      let out = text;
+      edits.sort((a, b) => b[0] - a[0]).forEach(([s, e, r]) => { out = out.slice(0, s) + r + out.slice(e); });
+      data = encodeLike(out, bytes);
+    }
+    return { data, changed, kept, removed, trailer: trailerDone };
+  }
+
+  function exportDialog() {
+    if (!state.files.length) return;
+    buildAnalysis();
+    const main = ana.data.main;
+    $("xMainLabel").textContent = main ? "Ne garder que le mois principal (" + monthName(main) + ")" : "Ne garder que le mois principal (aucune date exploitable)";
+    $("xMain").disabled = !main;
+    if (!main) $("xMain").checked = false;
+    $("xSelLabel").textContent = "Ne garder que la sélection affichée (" + plural(new Set(state.view.map((r) => r.path)).size, "fichier", "fichiers") + ", " + (state.client === null ? "tous clients" : "1 client") + ", " + rangeText() + (state.filter.trim() ? ", filtre « " + state.filter.trim() + " »" : "") + ")";
+    $("xDir").hidden = typeof window.showDirectoryPicker !== "function";
+    $("xResult").textContent = "";
+    $("expDialog").showModal();
+  }
+
+  async function runExport(target) {
+    const opts = {
+      sel: $("xSel").checked, main: $("xMain").checked, dup: $("xDup").checked, ko: $("xKo").checked,
+      empty: $("xEmpty").checked, trailer: $("xTrailer").checked, report: $("xReport").checked,
+      type: document.querySelector("input[name=xType]:checked").value,
+    };
+    const ctx = { opts, main: ana.data.main, seen: new Set() };
+    const viewPaths = new Set(state.view.map((r) => r.path));
+    const exportedHash = new Map();
+    const out = [], report = [];
+    const res = $("xResult");
+    const buttons = [$("xZip"), $("xDir")];
+    buttons.forEach((b) => { b.disabled = true; });
+    let dirHandle = null;
+    try {
+      if (target === "dir") {
+        // Les fichiers sont écrits dans un sous-répertoire neuf : rien d'existant n'est écrasé.
+        const parent = await window.showDirectoryPicker({ mode: "readwrite" });
+        dirHandle = await parent.getDirectoryHandle(exportName(""), { create: true });
+      }
+      for (let i = 0; i < state.files.length; i++) {
+        const f = state.files[i];
+        const path = f.entry.path;
+        const clients = f.res.units.map((u) => u.label).join(", ");
+        res.textContent = "Traitement " + (i + 1) + " / " + state.files.length + " : " + path;
+        let excluded = null;
+        if (opts.sel && !viewPaths.has(path)) excluded = "hors sélection";
+        else if (opts.ko && f.res.units.some((u) => u.check.state === "ko")) excluded = "écart avec le trailer";
+        else if (opts.dup && exportedHash.has(f.hash)) excluded = "contenu identique à " + exportedHash.get(f.hash);
+        if (excluded) { report.push([path, clients, "exclu : " + excluded, "", "", "", "", "", "", ""]); continue; }
+        let r;
+        try { r = await filterFile(f, ctx); } catch (e) { r = { error: errText(e) }; }
+        if (r.error) { report.push([path, clients, "exclu : " + r.error, "", "", "", "", "", "", ""]); continue; }
+        const nums = [r.kept.dN, r.kept.rN, r.removed.type, r.removed.sel, r.removed.main, r.removed.dup, r.trailer ? "oui" : "non"];
+        if (opts.empty && !r.kept.dN && !r.kept.rN) { report.push([path, clients, "exclu : vide après filtrage", ...nums]); continue; }
+        exportedHash.set(f.hash, path);
+        out.push({ name: path, data: r.data });
+        report.push([path, clients, r.changed ? "exporté, modifié" : "exporté tel quel", ...nums]);
+        if (i % 20 === 19) await tick();
+      }
+      if (opts.report) {
+        const q = (s) => '"' + String(s).replace(/"/g, '""') + '"';
+        const head = ["Fichier", "Clients", "Statut", "Dispenses gardées", "Refunds gardés", "Retirés : type", "Retirés : hors sélection", "Retirés : hors mois principal", "Retirés : doublons", "Trailer recalculé"];
+        const csv = "﻿" + [head, ...report].map((l) => l.map(q).join(";")).join("\r\n") + "\r\n";
+        out.push({ name: "rapport-export.csv", data: new TextEncoder().encode(csv) });
+      }
+      const nFiles = out.length - (opts.report ? 1 : 0);
+      if (!nFiles) { res.textContent = "Aucun fichier ne passe les règles choisies : rien n'a été exporté."; return; }
+      if (target === "dir") {
+        for (const o of out) {
+          const parts = o.name.split("/");
+          let d = dirHandle;
+          for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p, { create: true });
+          const w = await (await d.getFileHandle(parts[parts.length - 1], { create: true })).createWritable();
+          await w.write(o.data); await w.close();
+        }
+      } else {
+        const blob = await window.Archives.zipWrite(out);
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = exportName(".zip");
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      }
+      const changed = report.filter((l) => l[2] === "exporté, modifié").length;
+      const excl = report.filter((l) => l[2].startsWith("exclu")).length;
+      res.textContent = plural(nFiles, "fichier exporté", "fichiers exportés") + " (" + plural(changed, "modifié", "modifiés") + "), " + plural(excl, "fichier exclu", "fichiers exclus")
+        + (target === "dir" ? ", dans le répertoire « " + dirHandle.name + " »." : ", dans " + exportName(".zip") + ".") + (opts.report ? " Détail dans rapport-export.csv." : "");
+    } catch (e) {
+      res.textContent = e && e.name === "AbortError" ? "Export annulé." : "Export impossible : " + errText(e);
+    } finally {
+      buttons.forEach((b) => { b.disabled = false; });
+    }
+  }
+
+  let exportStamp = "";
+  function exportName(ext) {
+    if (!ext || !exportStamp) {
+      const d = new Date(), p = (n) => String(n).padStart(2, "0");
+      exportStamp = "export-xml-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+    }
+    return exportStamp + ext;
   }
 
   // ---- Export CSV ---------------------------------------------------------
@@ -1514,6 +1752,10 @@
     selectAndFocus();
   });
   $("copyNames").addEventListener("click", copyNames);
+  $("exportFiles").addEventListener("click", exportDialog);
+  $("xZip").addEventListener("click", () => { exportStamp = ""; runExport("zip"); });
+  $("xDir").addEventListener("click", () => { exportStamp = ""; runExport("dir"); });
+  $("xClose").addEventListener("click", () => $("expDialog").close());
   $("shortNames").addEventListener("change", (e) => {
     state.short = e.target.checked;
     pref("shortNames", state.short ? "1" : "0");
@@ -1579,6 +1821,7 @@
     if (e.key === "d" || e.key === "D") { e.preventDefault(); $("dateMin").focus(); return; }
     if (e.key === "s" || e.key === "S") { e.preventDefault(); openSynth(); return; }
     if (e.key === "a" || e.key === "A") { e.preventDefault(); openAnalysis(); return; }
+    if (e.key === "e" || e.key === "E") { e.preventDefault(); exportDialog(); return; }
     if (!inWrap || !state.view.length) return;
     let i = state.sel;
     switch (e.key) {

@@ -4,6 +4,17 @@ Une entrée par version publiée, la plus récente en premier. Le numéro est ce
 `version.json`, affiché dans l'application. Le build échoue si la version courante n'a pas
 son entrée ici.
 
+## v07 (2026-11-10)
+
+- Analyse : les doublons (fichiers identiques, flux communs, flux répétés) sont signalés en
+  rouge. Les refunds de même InvoiceID présents dans plusieurs fichiers sont aussi comptés. Les jours manquants du 1er au dernier jour du mois principal sont listés à part, en
+  rouge, tous clients et par client, avec une ligne rouge dans le résumé.
+- Bouton « Exporter les fichiers » (touche E) : les fichiers retenus sont écrits au format XML
+  d'origine, en ZIP ou dans un répertoire, selon des règles à cocher : sélection affichée,
+  mois principal, suppression des doublons, dispenses ou refunds seulement, exclusion des
+  fichiers en écart de trailer, des fichiers devenus vides. Le trailer des fichiers modifiés est
+  recalculé ; un rapport CSV détaille ce qui a été gardé et retiré.
+
 ## v06 (2026-11-10)
 
 - Nouvel écran « Analyse » (bouton ou touche A), sur la période sélectionnée, tous clients :
