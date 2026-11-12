@@ -79,6 +79,8 @@
     dmin: "",          // période sélectionnée : première date incluse (AAAA-MM-JJ), ou ""
     dmax: "",          // dernière date incluse, ou ""
     short: false,      // noms de fichier raccourcis
+    onlyDup: false,    // n'afficher que les fichiers au contenu identique à un autre
+    onlyShared: false, // n'afficher que les fichiers ayant des flux dupliqués
     gen: 0,
     usePickerApi: typeof window.showDirectoryPicker === "function",
     open: null,        // ligne ouverte dans la visionneuse
@@ -150,9 +152,26 @@
   const KIND_LABEL = { rar: "RAR", zip: "ZIP", tar: "TAR", gz: "GZIP" };
   const archiveReader = (kind) => (kind === "rar" ? rarReader() : Promise.resolve(window.Archives[kind]));
 
+  // Les octets lus au chargement sont gardés en mémoire (dans la limite de CACHE_MAX) : l'export et
+  // la visionneuse n'ont alors plus à relire le disque, où le fichier a pu changer depuis.
+  const CACHE_MAX = 512 * 1024 * 1024;
+  let cacheUsed = 0;
+  function remember(entry, bytes) {
+    if (cacheUsed + bytes.length > CACHE_MAX) return;
+    entry.cached = bytes;
+    cacheUsed += bytes.length;
+  }
   async function bytesOf(entry) {
-    if (entry.getBytes) return entry.getBytes();
-    return new Uint8Array(await (await entry.getFile()).arrayBuffer());
+    if (entry.cached) return entry.cached;
+    try {
+      if (entry.getBytes) return await entry.getBytes();
+      return new Uint8Array(await (await entry.getFile()).arrayBuffer());
+    } catch (e) {
+      if (e && e.name === "NotReadableError" || e && e.name === "NotFoundError") {
+        throw new Error("fichier modifié, déplacé ou supprimé sur le disque depuis le chargement : relisez le répertoire");
+      }
+      throw e;
+    }
   }
 
   function kids(el) {
@@ -365,6 +384,7 @@
     const src = state.source;
     if (!src) return;
     const gen = ++state.gen;
+    cacheUsed = 0;
     const recursive = $("recursive").checked;
     const entries = src.entries.filter((e) => recursive || e.depth === 0)
       .sort((a, b) => cmpText(a.path, b.path));
@@ -382,7 +402,8 @@
       if (doc.getElementsByTagName("parsererror").length) { ignored.push({ path: entry.path, reason: "XML mal formé" }); return; }
       const res = analyze(doc);
       if (!res) { ignored.push({ path: entry.path, reason: "aucun enregistrement " + REC + " ou " + REF }); return; }
-      files.push({ entry, res, color: -1, hash: await contentHash(bytes), sameAs: [] });
+      files.push({ entry, res, color: -1, hash: await contentHash(bytes), sameAs: [], sharedFlux: 0, repeatedFlux: 0 });
+      remember(entry, bytes);
     }
 
     // Une archive (RAR, ZIP, TAR, GZIP) se comporte comme un répertoire :
@@ -441,6 +462,21 @@
     const byHash = new Map();
     for (const f of files) { const l = byHash.get(f.hash); if (l) l.push(f); else byHash.set(f.hash, [f]); }
     for (const l of byHash.values()) if (l.length > 1) for (const f of l) f.sameAs = l.filter((o) => o !== f).map((o) => o.entry.path);
+    // Flux dupliqués : InvoiceID présent dans un autre fichier (de contenu différent), ou répété
+    // dans le fichier (plus d'enregistrements Dispense que d'InvoiceID distincts).
+    const owners = new Map();
+    for (const f of files) for (const u of f.res.units) u.dates.forEach((a) => {
+      for (const [set, kind] of [[a.inv, "d"], [a.refInv, "r"]]) set.forEach((id) => {
+        const key = kind + "\u0001" + id;
+        let o = owners.get(key);
+        if (!o) { o = new Set(); owners.set(key, o); }
+        o.add(f.hash);
+      });
+    });
+    for (const f of files) for (const u of f.res.units) u.dates.forEach((a) => {
+      f.repeatedFlux += a.dispN - a.inv.size - a.noId;
+      for (const [set, kind] of [[a.inv, "d"], [a.refInv, "r"]]) set.forEach((id) => { if (owners.get(kind + "\u0001" + id).size > 1) f.sharedFlux++; });
+    });
 
     state.files = files;
     state.ignored = ignored;
@@ -600,7 +636,7 @@
   }
 
   function renderSynth(t) {
-    const active = state.client !== null || !!state.dmin || !!state.dmax;
+    const active = state.client !== null || !!state.dmin || !!state.dmax || state.onlyDup || state.onlyShared;
     $("selbar").classList.toggle("active", active);
     $("selClear").hidden = !active;
     const box = $("synth");
@@ -650,6 +686,10 @@
   function computeView() {
     const q = state.filter.trim().toLowerCase();
     let rows = state.rows;
+    // Coches « Doublons » et « Flux dupliqués » : cochées ensemble, l'une ou l'autre suffit.
+    if (state.onlyDup || state.onlyShared) {
+      rows = rows.filter((r) => (state.onlyDup && r.sameAs.length) || (state.onlyShared && (r.file.sharedFlux || r.file.repeatedFlux)));
+    }
     if (q) rows = rows.filter((r) => (r.path + " " + r.date + " " + r.emis + " " + r.hash + " " + r.client).toLowerCase().includes(q));
     const col = COLS.find((c) => c.key === state.sort.key) || COLS[0];
     const dir = state.sort.dir;
@@ -1526,7 +1566,8 @@
     const doc = new DOMParser().parseFromString(text, "application/xml");
     const dom = { [REC]: doc.getElementsByTagName(REC), [REF]: doc.getElementsByTagName(REF) };
     const blockOf = blockResolver();
-    const removed = { type: 0, sel: 0, main: 0, dup: 0 };
+    const removed = { type: 0, sel: 0, main: 0, dup: 0, rep: 0 };
+    const local = new Set();                   // InvoiceID déjà gardés dans ce fichier
     const kept = { dN: 0, rN: 0 };
     const stats = new Map();                   // bloc → totaux des enregistrements gardés
     const whole = { dN: 0, dS: 0, rN: 0, rS: 0 };
@@ -1547,13 +1588,14 @@
       if ((opts.type === "dispense" && tag === REF) || (opts.type === "refund" && tag === REC)) reason = "type";
       else if (opts.sel && ((state.client !== null && ck !== state.client) || !inRange(date))) reason = "sel";
       else if (opts.main && date.slice(0, 7) !== ctx.main) reason = "main";
-      else if (opts.dup && id && ctx.seen.has(tag + "\u0001" + id)) reason = "dup";
+      else if (opts.rep && id && local.has(tag + "\u0001" + id)) reason = "rep";
+      else if (opts.dup && id && !local.has(tag + "\u0001" + id) && ctx.seen.has(tag + "\u0001" + id)) reason = "dup";
       if (reason) {
         removed[reason]++;
         edits.push([...lineRange(text, m.index, m.index + m[0].length), ""]);
         continue;
       }
-      if (id) ctx.seen.add(tag + "\u0001" + id);
+      if (id) local.add(tag + "\u0001" + id);
       const amount = cents(txt(kk.TotalAmount)) || 0;
       const isD = tag === REC;
       kept[isD ? "dN" : "rN"]++;
@@ -1563,6 +1605,7 @@
     }
     if (k[REC] !== dom[REC].length || k[REF] !== dom[REF].length) return { error: "structure du fichier non reconnue" };
 
+    local.forEach((x) => ctx.seen.add(x));       // visibles des fichiers suivants
     const changed = edits.length > 0;
     let trailerDone = false;
     if (changed && opts.trailer) {
@@ -1605,7 +1648,7 @@
 
   async function runExport(target) {
     const opts = {
-      sel: $("xSel").checked, main: $("xMain").checked, dup: $("xDup").checked, ko: $("xKo").checked,
+      sel: $("xSel").checked, main: $("xMain").checked, dup: $("xDup").checked, rep: $("xRep").checked, ko: $("xKo").checked,
       empty: $("xEmpty").checked, trailer: $("xTrailer").checked, report: $("xReport").checked,
       type: document.querySelector("input[name=xType]:checked").value,
     };
@@ -1632,11 +1675,11 @@
         if (opts.sel && !viewPaths.has(path)) excluded = "hors sélection";
         else if (opts.ko && f.res.units.some((u) => u.check.state === "ko")) excluded = "écart avec le trailer";
         else if (opts.dup && exportedHash.has(f.hash)) excluded = "contenu identique à " + exportedHash.get(f.hash);
-        if (excluded) { report.push([path, clients, "exclu : " + excluded, "", "", "", "", "", "", ""]); continue; }
+        if (excluded) { report.push([path, clients, "exclu : " + excluded, "", "", "", "", "", "", "", ""]); continue; }
         let r;
         try { r = await filterFile(f, ctx); } catch (e) { r = { error: errText(e) }; }
-        if (r.error) { report.push([path, clients, "exclu : " + r.error, "", "", "", "", "", "", ""]); continue; }
-        const nums = [r.kept.dN, r.kept.rN, r.removed.type, r.removed.sel, r.removed.main, r.removed.dup, r.trailer ? "oui" : "non"];
+        if (r.error) { report.push([path, clients, "exclu : " + r.error, "", "", "", "", "", "", "", ""]); continue; }
+        const nums = [r.kept.dN, r.kept.rN, r.removed.type, r.removed.sel, r.removed.main, r.removed.dup, r.removed.rep, r.trailer ? "oui" : "non"];
         if (opts.empty && !r.kept.dN && !r.kept.rN) { report.push([path, clients, "exclu : vide après filtrage", ...nums]); continue; }
         exportedHash.set(f.hash, path);
         out.push({ name: path, data: r.data });
@@ -1645,7 +1688,7 @@
       }
       if (opts.report) {
         const q = (s) => '"' + String(s).replace(/"/g, '""') + '"';
-        const head = ["Fichier", "Clients", "Statut", "Dispenses gardées", "Refunds gardés", "Retirés : type", "Retirés : hors sélection", "Retirés : hors mois principal", "Retirés : doublons", "Trailer recalculé"];
+        const head = ["Fichier", "Clients", "Statut", "Dispenses gardées", "Refunds gardés", "Retirés : type", "Retirés : hors sélection", "Retirés : hors mois principal", "Retirés : doublons entre fichiers", "Retirés : répétés dans le fichier", "Trailer recalculé"];
         const csv = "﻿" + [head, ...report].map((l) => l.map(q).join(";")).join("\r\n") + "\r\n";
         out.push({ name: "rapport-export.csv", data: new TextEncoder().encode(csv) });
       }
@@ -1660,12 +1703,7 @@
           await w.write(o.data); await w.close();
         }
       } else {
-        const blob = await window.Archives.zipWrite(out);
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = exportName(".zip");
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        download(await window.Archives.zipWrite(out), exportName(".zip"));
       }
       const changed = report.filter((l) => l[2] === "exporté, modifié").length;
       const excl = report.filter((l) => l[2].startsWith("exclu")).length;
@@ -1687,8 +1725,24 @@
     return exportStamp + ext;
   }
 
+  // Téléchargement d'un fichier produit dans la page. L'adresse du contenu reste valable
+  // 10 minutes : si le navigateur demande où enregistrer, le choix peut prendre du temps,
+  // et une adresse révoquée trop tôt fait échouer le téléchargement.
+  function download(blob, name) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 600000);
+  }
+  window.saveBlob = download;                  // utilisé aussi par l'export d'image des graphes
+
   // ---- Export CSV ---------------------------------------------------------
   function exportCsv() {
+    try { exportCsvRows(); }
+    catch (e) { toast("Export CSV impossible : " + errText(e)); }
+  }
+  function exportCsvRows() {
     const num = (v, dec) => (dec ? v.toFixed(2) : String(v)).replace(".", ",");
     const q = (s) => '"' + String(s).replace(/"/g, '""') + '"';
     const val = (c, r) => {
@@ -1702,12 +1756,10 @@
     const lines = [COLS.map((c) => q(c.label)).join(";")];
     for (const r of state.view) lines.push(COLS.map((c) => val(c, r)).join(";"));
     const blob = new Blob(["\ufeff" + lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
-    const a = document.createElement("a");
     const d = new Date(), p = (n) => String(n).padStart(2, "0");
-    a.href = URL.createObjectURL(blob);
-    a.download = "stats-reconciliation-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + ".csv";
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    const name = "stats-reconciliation-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + ".csv";
+    download(blob, name);
+    toast("Export CSV : " + plural(state.view.length, "ligne", "lignes") + ", fichier " + name + ".");
   }
 
   // ---- Noms des fichiers affichés, vers le presse-papiers --------------------
@@ -1841,8 +1893,13 @@
   // Les bornes s'appliquent pendant la saisie, sans quitter le champ.
   $("dateMin").addEventListener("change", applySelection);
   $("dateMax").addEventListener("change", applySelection);
+  for (const [id, key] of [["onlyDup", "onlyDup"], ["onlyShared", "onlyShared"]]) {
+    $(id).addEventListener("change", (e) => { state[key] = e.target.checked; state.sel = 0; render(); $("tableWrap").focus(); });
+  }
   $("selClear").addEventListener("click", () => {
     $("selClient").value = ""; $("dateMin").value = ""; $("dateMax").value = "";
+    $("onlyDup").checked = $("onlyShared").checked = false;
+    state.onlyDup = state.onlyShared = false;
     selectAndFocus();
   });
   $("copyNames").addEventListener("click", copyNames);

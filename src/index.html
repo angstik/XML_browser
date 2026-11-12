@@ -40,14 +40,17 @@
     <input id="filter" type="search" placeholder="Filtrer par fichier, date ou client" aria-label="Filtrer les lignes">
     <button id="selClear" type="button" hidden>Tout afficher</button>
     <span class="spacer"></span>
-    <label class="check" title="N'afficher que les 5 derniers caractères du nom de fichier"><input type="checkbox" id="shortNames"> Noms courts</label>
-    <label class="check"><input type="checkbox" id="recursive"> Sous-répertoires</label>
+    <label class="check" title="N'afficher que les fichiers au contenu identique à un autre fichier chargé"><input type="checkbox" id="onlyDup"> Doublons</label>
+    <label class="check" title="N'afficher que les fichiers dont des flux (InvoiceID) se retrouvent dans un autre fichier, ou sont répétés dans le fichier"><input type="checkbox" id="onlyShared"> Flux dupliqués</label>
     <span class="selbar-break"></span>
     <button id="openSynth" type="button" class="btn-synth" title="Totaux et graphe par client. Raccourci : S">Analyse client</button>
     <button id="openAnalysis" type="button" class="btn-ana" title="Contrôles de cohérence. Raccourci : A">Analyse</button>
     <button id="copyNames" type="button" title="Copie dans le presse-papiers les noms des fichiers affichés, séparés par des virgules">Copier les noms</button>
     <button id="exportFiles" type="button" title="Exporter les fichiers retenus, au format XML d'origine. Raccourci : E">Exporter les fichiers</button>
     <button id="csv" type="button">Exporter en CSV</button>
+    <span class="spacer"></span>
+    <label class="check" title="N'afficher que les 5 derniers caractères du nom de fichier"><input type="checkbox" id="shortNames"> Noms courts</label>
+    <label class="check"><input type="checkbox" id="recursive"> Sous-répertoires</label>
     <span id="synth" class="synth" aria-live="polite"></span>
   </div>
 
@@ -159,7 +162,8 @@
   <fieldset>
     <legend>Enregistrements</legend>
     <label><input type="checkbox" id="xMain"> <span id="xMainLabel">Ne garder que le mois principal</span></label>
-    <label><input type="checkbox" id="xDup"> Supprimer les doublons : fichiers identiques, flux (InvoiceID) déjà exportés ou répétés</label>
+    <label><input type="checkbox" id="xDup"> Supprimer les doublons : fichiers identiques, et flux (InvoiceID) déjà présents dans un fichier exporté avant</label>
+    <label><input type="checkbox" id="xRep"> Supprimer les flux répétés dans un même fichier (la première occurrence est gardée)</label>
     <div class="x-radio" role="radiogroup" aria-label="Types d'enregistrement">
       <label><input type="radio" name="xType" value="all" checked> Dispenses et refunds</label>
       <label><input type="radio" name="xType" value="dispense"> Exclure les refunds</label>

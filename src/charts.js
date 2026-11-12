@@ -288,11 +288,7 @@
         canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
         canvas.toBlob((blob) => {
           if (!blob) { reject(new Error("image trop grande pour ce navigateur")); return; }
-          const a = document.createElement("a");
-          a.href = URL.createObjectURL(blob);
-          a.download = fileName;
-          document.body.appendChild(a); a.click(); a.remove();
-          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+          window.saveBlob(blob, fileName);
           resolve({ width: canvas.width, height: canvas.height });
         }, "image/png");
       };

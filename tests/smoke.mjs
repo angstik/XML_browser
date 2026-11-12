@@ -87,7 +87,14 @@ try {
   const total = (await cells("#tfoot tr"))[0];
   assert.deepEqual([total[0], total[1], total[6], total[7]], ["Total : 4 fichiers", "2 clients", "8", "96,00"]);
   assert.deepEqual(await page.$$eval("#ignoredList li", (l) => l.map((x) => x.textContent)), ["notes.txt pas un fichier XML"]);
-  step("tableau : répertoire, multi-clients, archive RAR, total");
+  // Coches d'écran : aucun doublon ni flux dupliqué dans ce répertoire.
+  await page.check("#onlyDup");
+  assert.equal(await page.$$eval("#tbody tr", (t) => t.length), 0);
+  await page.uncheck("#onlyDup");
+  await page.check("#onlyShared");
+  assert.equal(await page.$$eval("#tbody tr", (t) => t.length), 0);
+  await page.uncheck("#onlyShared");
+  step("tableau : répertoire, multi-clients, archive RAR, total, coches doublons");
 
   // Noms courts.
   await page.check("#shortNames");
@@ -247,6 +254,10 @@ try {
   assert.match(await page.textContent(".cm-content"), /ReconcilePayLoad/);
   await page.keyboard.press("Escape");
   await page.waitForSelector("#viewer", { state: "hidden" });
+  // Le même fichier dans 4 archives : la coche « Doublons » les garde toutes.
+  await page.check("#onlyDup");
+  assert.equal(await page.$$eval("#tbody tr", (t) => t.length), 8);
+  await page.uncheck("#onlyDup");
   step("archives ZIP, TAR et TAR.GZ");
 
   // Hors ligne : l'application se recharge depuis le cache et lit toujours les RAR.

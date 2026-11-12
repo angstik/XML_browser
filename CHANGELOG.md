@@ -4,6 +4,21 @@ Une entrée par version publiée, la plus récente en premier. Le numéro est ce
 `version.json`, affiché dans l'application. Le build échoue si la version courante n'a pas
 son entrée ici.
 
+## v09 (2026-11-12)
+
+- Écran principal : coches « Doublons » (fichiers au contenu identique à un autre) et « Flux
+  dupliqués » (fichiers dont des InvoiceID se retrouvent dans un autre fichier ou sont répétés
+  dans le fichier). Cochées ensemble, l'une ou l'autre condition suffit.
+- Export des fichiers : la règle « doublons » (fichiers identiques, flux déjà présents dans un
+  fichier exporté avant) est séparée de la règle « flux répétés dans un même fichier » ; le
+  rapport les compte dans deux colonnes.
+- Les octets lus au chargement sont gardés en mémoire (jusqu'à 512 Mo) : l'export et la
+  visionneuse ne relisent plus le disque. Un fichier devenu illisible sur le disque est signalé
+  clairement (« fichier modifié, déplacé ou supprimé depuis le chargement »).
+- Téléchargements (CSV, ZIP, image) : l'adresse du contenu reste valable 10 minutes, pour les
+  navigateurs qui demandent où enregistrer. L'export CSV confirme le nombre de lignes et
+  affiche un message en cas d'erreur.
+
 ## v08 (2026-11-12)
 
 - Analyse : les noms de fichier sont des liens vers le détail du fichier, les noms de client
