@@ -126,6 +126,11 @@
       const band = svg("rect", { x: sx, y: M.top - 6, width: slot, height: M.plot + 6, class: "viz-band" });
       plot.appendChild(band);
       bands.push(band);
+      // Samedi et dimanche : fond légèrement teinté, pour repérer les semaines.
+      if (ISO.test(d.date)) {
+        const wd = new Date(toUtc(d.date)).getUTCDay();
+        if (wd === 0 || wd === 6) plot.insertBefore(svg("rect", { x: sx, y: M.top - 6, width: slot, height: M.plot + 6, class: "viz-weekend" }), band);
+      }
       // Jour hors enveloppe : fond rouge sur toute la hauteur.
       if (d.flag) plot.appendChild(svg("rect", { x: sx, y: M.top - 6, width: slot, height: M.plot + 6, class: "viz-flag" }));
       if (d.future) plot.appendChild(svg("rect", { x: sx, y: M.top - 6, width: slot, height: M.plot + 6, class: "viz-future" }));
@@ -332,6 +337,12 @@
         flag.appendChild(document.createTextNode("Hors enveloppe"));
         legend.appendChild(flag);
       }
+    }
+    if (days.some((d) => ISO.test(d.date) && [0, 6].includes(new Date(toUtc(d.date)).getUTCDay()))) {
+      const we = el("span", "viz-key");
+      we.appendChild(el("i", "k-weekend"));
+      we.appendChild(document.createTextNode("Samedi et dimanche"));
+      legend.appendChild(we);
     }
     head.appendChild(legend);
     const exportBtn = el("button", "viz-export-btn", "Exporter en image");

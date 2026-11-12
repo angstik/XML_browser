@@ -4,6 +4,11 @@ Une entrée par version publiée, la plus récente en premier. Le numéro est ce
 `version.json`, affiché dans l'application. Le build échoue si la version courante n'a pas
 son entrée ici.
 
+## v10 (2026-11-12)
+
+- Graphes : samedis et dimanches sur fond violet clair, pour repérer les semaines ; entrée
+  « Samedi et dimanche » dans la légende ; fond conservé dans l'export image.
+
 ## v09 (2026-11-12)
 
 - Écran principal : coches « Doublons » (fichiers au contenu identique à un autre) et « Flux

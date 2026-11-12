@@ -384,6 +384,8 @@ i.k-line.s2 { background: var(--line-2); }
 .viz-fc-line { fill: none; stroke: var(--fc); stroke-width: 2; stroke-dasharray: 6 3; stroke-linejoin: round; }
 .viz-flag { fill: var(--flag); fill-opacity: .13; }
 .viz-future { fill: var(--muted); fill-opacity: .07; }
+.viz-weekend { fill: #7a5bc0; fill-opacity: .08; }
+.viz-key i.k-weekend { width: 10px; height: 10px; border-radius: 2px; background: color-mix(in srgb, #7a5bc0 18%, transparent); }
 .viz-key i.k-fc { width: 16px; height: 10px; border-radius: 2px; background: color-mix(in srgb, var(--fc) 22%, transparent); border-top: 2px dashed var(--fc); }
 .viz-key i.k-flag { width: 10px; height: 10px; border-radius: 2px; background: color-mix(in srgb, var(--flag) 22%, transparent); }
 .viz-tip-fc { margin-top: 6px; color: var(--fc); font-weight: 600; }
