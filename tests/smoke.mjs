@@ -156,7 +156,7 @@ try {
   assert.equal(await page.$$eval("#viz .viz-line", (l) => l.length), 2, "une courbe par série");
   assert.equal(await page.$$eval("#viz .viz-dot", (d) => d.length), 6, "3 jours × 2 séries");
   assert.deepEqual(await page.$$eval("#viz .viz-key", (k) => k.map((x) => x.textContent)),
-    ["Dispense, valeur HT", "Refund, valeur HT", "Dispense, nombre", "Refund, nombre"]);
+    ["Dispense, valeur HT", "Refund, valeur HT", "Dispense, nombre", "Refund, nombre", "Prévision, valeur HT (0 hors janv. 2026)"]);
   // Le 1er janvier ouvre l'axe : un trait de début de mois, avec son libellé.
   assert.deepEqual(await page.$$eval("#viz .viz-month-label", (t) => t.map((x) => x.textContent)), ["janv. 2026"]);
   // Export en image : un PNG valide, plus large que haut.
@@ -169,7 +169,8 @@ try {
   assert.match(await page.textContent("#vizCaption"), /AAA \(K1\).*du 2026-01-01 au 2026-01-02/);
   await page.click("#viz .viz-toggle");
   const dayTable = await cells("#viz .viz-table tbody tr");
-  assert.deepEqual(dayTable, [["2026-01-01", "3", "30,00", "1", "10,00"], ["2026-01-02", "1", "10,00", "0", "0,00"]]);
+  assert.deepEqual(dayTable.slice(0, 2).map((r) => r.slice(0, 5)), [["2026-01-01", "3", "30,00", "1", "10,00"], ["2026-01-02", "1", "10,00", "0", "0,00"]]);
+  assert.equal(dayTable[0].length, 7, "colonnes Prévision et Enveloppe");
   await page.keyboard.press("ArrowDown");          // les flèches changent de client même si le focus est sur un bouton
   assert.match(await page.textContent("#vizCaption"), /BBB \(K2\)/);
   assert.equal(await page.isVisible("#viz .viz-table"), true, "la vue tableau est conservée en changeant de client");
@@ -189,9 +190,15 @@ try {
   assert.match(await page.textContent("#aSum"), /Doublons : 0 fichier identique/);
   assert.ok(await page.$$eval("#aViz .viz-fc-line", (l) => l.length) >= 1, "courbe de prévision");
   assert.equal(await page.$$eval("#aViz .viz-future", (r) => r.length), 7, "7 jours de prévision");
+  // Un client cité ouvre l'analyse client, ce client présélectionné ; Échap ramène à l'analyse.
+  await page.click("#aMonths .ana-link >> text=BBB (K2)");
+  await page.waitForSelector("#synthScreen:not([hidden])");
+  assert.match(await page.textContent("#vizCaptionText"), /BBB \(K2\)/);
+  await page.keyboard.press("Escape");
+  await page.waitForSelector("#anaScreen:not([hidden])");
   await page.keyboard.press("Escape");
   await page.waitForSelector("#anaScreen", { state: "hidden" });
-  step("écran Analyse");
+  step("écran Analyse, lien vers l'analyse client et retour");
 
   // Export des fichiers : refunds exclus, trailer recalculé, au format d'origine.
   if (await page.isVisible("#selClear")) await page.click("#selClear");   // toute la sélection

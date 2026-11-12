@@ -1,7 +1,7 @@
 # XML Browser
 
 Application web installable (PWA) pour analyser des fichiers XML de réconciliation
-(`ReconcilePayLoad`) : statistiques par fichier, client et date, synthèse par client,
+(`ReconcilePayLoad`) : statistiques par fichier, client et date, analyse client,
 graphes par jour et lecture des fichiers dans une visionneuse XML.
 
 Application en ligne : <https://angstik.github.io/XML_browser/>
@@ -20,7 +20,7 @@ Application en ligne : <https://angstik.github.io/XML_browser/>
 - **Sélections** : par client, par période (date minimale et maximale, ou mois complet),
   filtre texte, tri par colonne, noms de fichier raccourcis aux 5 derniers caractères,
   export CSV, copie des noms de fichier affichés dans le presse-papiers.
-- **Synthèse par client** : totaux par client sur la période sélectionnée, et un graphe par
+- **Analyse client** : totaux par client sur la période sélectionnée, et un graphe par
   jour : montants HT en barres, volumes en courbes, pour les dispenses et les refunds. L'axe
   des jours est continu, un trait vertical marque chaque 1er du mois, et le graphe s'exporte
   en image PNG. Un tableau donne les mêmes valeurs.
@@ -34,7 +34,7 @@ Application en ligne : <https://angstik.github.io/XML_browser/>
 - **Visionneuse XML** en lecture seule : coloration, recherche, repli par élément ou par niveau.
 
 Clavier : `↑` `↓` parcourir, `Entrée` ouvrir, `Échap` revenir, `/` filtrer, `C` client,
-`D` période, `S` synthèse, `A` analyse, `E` export.
+`D` période, `S` analyse client, `A` analyse, `E` export.
 
 ## Confidentialité
 

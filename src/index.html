@@ -42,8 +42,9 @@
     <span class="spacer"></span>
     <label class="check" title="N'afficher que les 5 derniers caractères du nom de fichier"><input type="checkbox" id="shortNames"> Noms courts</label>
     <label class="check"><input type="checkbox" id="recursive"> Sous-répertoires</label>
-    <button id="openSynth" type="button" title="Raccourci : S">Synthèse par client</button>
-    <button id="openAnalysis" type="button" title="Contrôles de cohérence. Raccourci : A">Analyse</button>
+    <span class="selbar-break"></span>
+    <button id="openSynth" type="button" class="btn-synth" title="Totaux et graphe par client. Raccourci : S">Analyse client</button>
+    <button id="openAnalysis" type="button" class="btn-ana" title="Contrôles de cohérence. Raccourci : A">Analyse</button>
     <button id="copyNames" type="button" title="Copie dans le presse-papiers les noms des fichiers affichés, séparés par des virgules">Copier les noms</button>
     <button id="exportFiles" type="button" title="Exporter les fichiers retenus, au format XML d'origine. Raccourci : E">Exporter les fichiers</button>
     <button id="csv" type="button">Exporter en CSV</button>
@@ -80,7 +81,7 @@
     <span><kbd>/</kbd> filtrer</span>
     <span><kbd>C</kbd> client</span>
     <span><kbd>D</kbd> période</span>
-    <span><kbd>S</kbd> synthèse</span>
+    <span><kbd>S</kbd> analyse client</span>
     <span><kbd>A</kbd> analyse</span>
     <span><kbd>E</kbd> export</span>
     <span id="count" class="count"></span>
@@ -111,8 +112,9 @@
 <section id="synthScreen" class="screen" hidden>
   <header class="bar">
     <button id="sBack" type="button" title="Échap">Retour au tableau</button>
-    <h1>Synthèse par client</h1>
+    <h1>Analyse client</h1>
     <span id="sScope" class="dirname"></span>
+    <span class="bar-hint"><kbd>↑</kbd> <kbd>↓</kbd> client, le graphe suit · <kbd>Entrée</kbd> ses lignes au tableau · <kbd>Échap</kbd> retour</span>
   </header>
   <div class="synth-body">
     <div id="sTableWrap" class="tablewrap flat" tabindex="0" aria-label="Synthèse par client">
@@ -122,15 +124,15 @@
       </table>
     </div>
     <figure class="viz-root">
-      <figcaption id="vizCaption"></figcaption>
+      <figcaption id="vizCaption"><span id="vizCaptionText"></span>
+        <select id="sMeasure" aria-label="Mesure prévue">
+          <option value="dHT">Prévision de la valeur HT</option>
+          <option value="dN">Prévision du nombre de flux</option>
+        </select>
+      </figcaption>
       <div id="viz"></div>
     </figure>
   </div>
-  <footer class="hint">
-    <span><kbd>↑</kbd> <kbd>↓</kbd> changer de client : le graphe suit</span>
-    <span><kbd>Entrée</kbd> voir les lignes de ce client dans le tableau</span>
-    <span><kbd>Échap</kbd> retour</span>
-  </footer>
 </section>
 
 <section id="anaScreen" class="screen" hidden>

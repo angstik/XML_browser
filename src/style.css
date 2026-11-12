@@ -258,9 +258,26 @@ tfoot td:first-child { z-index: 3; }
   .fwrap { max-width: 24ch; }
 }
 
-/* Synthèse par client */
-.synth-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
-.tablewrap.flat { flex: none; max-height: 42vh; border-bottom: 1px solid var(--line); }
+/* Analyse client : écran figé. Le tableau défile seul (titres toujours visibles), le graphe reste en bas. */
+.synth-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.tablewrap.flat { flex: 1 1 auto; min-height: 96px; border-bottom: 1px solid var(--line); }
+#synthScreen .viz-root { flex: none; padding: 8px 16px 10px; }
+#synthScreen .viz-root figcaption { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+#synthScreen figcaption select { font: inherit; font-size: 13px; font-weight: 400; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; }
+.bar-hint { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* Boutons d'analyse, repérables d'un coup d'œil, en tête de la seconde ligne */
+.selbar-break { flex-basis: 100%; height: 0; }
+button.btn-synth { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+button.btn-ana { background: color-mix(in srgb, #7a3fb8 14%, var(--surface)); border-color: #7a3fb8; color: #7a3fb8; font-weight: 600; }
+@media (prefers-color-scheme: dark) { button.btn-ana { border-color: #b79cf0; color: #b79cf0; background: color-mix(in srgb, #b79cf0 16%, var(--surface)); } }
+
+/* Liens de l'écran Analyse */
+.ana-link { all: unset; cursor: pointer; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.ana-link:hover { text-decoration-thickness: 2px; }
+.ana-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ana-table tr.err .ana-link { color: var(--red); }
+.ana-lines { display: inline-block; white-space: nowrap; }
 #sHead th { padding: 8px 12px; }
 #sHead th:first-child { padding-left: 16px; }
 #sBody tr.all td { font-weight: 650; }

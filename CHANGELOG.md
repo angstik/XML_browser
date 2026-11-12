@@ -4,6 +4,18 @@ Une entrée par version publiée, la plus récente en premier. Le numéro est ce
 `version.json`, affiché dans l'application. Le build échoue si la version courante n'a pas
 son entrée ici.
 
+## v08 (2026-11-12)
+
+- Analyse : les noms de fichier sont des liens vers le détail du fichier, les noms de client
+  des liens vers l'analyse client, ce client présélectionné ; Échap ramène à l'analyse.
+- Analyse : dans les tableaux de doublons, les fichiers sont listés l'un sous l'autre.
+- « Synthèse par client » devient « Analyse client ». Les boutons Analyse client et Analyse
+  sont colorés.
+- Analyse client : écran figé, le tableau défile seul avec sa ligne de titres, le graphe reste
+  en bas ; le mode d'emploi passe dans le bandeau du haut.
+- Analyse client : le graphe porte l'enveloppe prévisionnelle du client (ou de l'agrégat),
+  mise à 0 hors du mois principal, avec les jours hors enveloppe ; mesure prévue au choix.
+
 ## v07 (2026-11-10)
 
 - Analyse : les doublons (fichiers identiques, flux communs, flux répétés) sont signalés en

@@ -322,13 +322,20 @@
   // Lignes (fichier × client × date) compte tenu du client et de la période sélectionnés.
   function buildRows() {
     const rows = [];
-    for (const f of state.files) {
-      const res = f.res;
+    for (const f of state.files) rows.push(...rowsOf(f, (u) => state.client === null || u.key === state.client, inRange));
+    state.rows = rows;
+  }
+
+  // Lignes d'un fichier (un client × une date), filtrées par client et par date.
+  function rowsOf(f, keepUnit, keepDate) {
+    const rows = [];
+    const res = f.res;
+    {
       for (const u of res.units) {
-        if (state.client !== null && u.key !== state.client) continue;
+        if (!keepUnit(u)) continue;
         const dates = [...u.dates.keys()].sort();
         for (const d of dates) {
-          if (!inRange(d)) continue;
+          if (!keepDate(d)) continue;
           const a = u.dates.get(d);
           rows.push({
             file: f, entry: f.entry, path: f.entry.path, unit: u,
@@ -350,7 +357,7 @@
         }
       }
     }
-    state.rows = rows;
+    return rows;
   }
 
   // ---- Chargement ---------------------------------------------------------
@@ -836,11 +843,18 @@
     return s;
   }
 
+  // Écran d'où l'on vient (tableau, analyse ou analyse client) : Échap y ramène.
+  let viewerFrom = "list";
+  const SCREENS = ["list", "anaScreen", "synthScreen"];
+  const visibleScreen = () => SCREENS.find((id) => !$(id).hidden) || "list";
+
   async function openRow(r) {
     if (!r) return;
-    savedScroll = $("tableWrap").scrollTop;
+    viewerFrom = visibleScreen();
+    if (viewerFrom === "list") savedScroll = $("tableWrap").scrollTop;
+    else anaScroll = $("aBody").scrollTop;
     state.open = r;
-    $("list").hidden = true;
+    $(viewerFrom).hidden = true;
     $("viewer").hidden = false;
 
     const sum = $("summary"); sum.textContent = "";
@@ -927,7 +941,9 @@
     if ($("viewer").hidden) return;
     state.open = null;
     $("viewer").hidden = true;
-    $("list").hidden = false;
+    $(viewerFrom).hidden = false;
+    if (viewerFrom === "anaScreen") { $("aBody").scrollTop = anaScroll; $("aBody").focus(); return; }
+    if (viewerFrom === "synthScreen") { $("sTableWrap").focus(); return; }
     $("tableWrap").scrollTop = savedScroll;
     select(state.sel, true);
     $("tableWrap").focus();
@@ -1037,29 +1053,63 @@
     if (scroll) reveal(tr, $("sTableWrap"));
 
     const r = synth.rows[synth.sel];
-    const days = [...r.byDay.values()].sort((a, b) => cmpText(a.date, b.date))
+    let days = [...r.byDay.values()].sort((a, b) => cmpText(a.date, b.date))
       .map((d) => ({ date: d.date, dN: d.dN, dHT: d.dHT / 100, rN: d.rN, rHT: d.rHT / 100 }));
-    const dated = days.filter((d) => d.date);
+    // Prévision du client (ou de l'agrégat), mise à 0 hors du mois principal.
+    const A = ana.data, fcm = A && A.fc[ana.measure];
+    const p = fcm && (r.key === null ? fcm.all : fcm.per.get(r.key));
+    let forecast = null;
+    if (p && A.main) {
+      const byDate = new Map(days.map((d) => [d.date, d]));
+      const out = [];
+      for (let i = 0; i < p.e.length; i++) {
+        const date = isoOf(fcm.t0 + (p.off + i) * Analysis.DAY);
+        const x = byDate.get(date);
+        byDate.delete(date);
+        const inMain = date.slice(0, 7) === A.main, future = i >= p.values.length;
+        const d = x ? { ...x } : { date, dN: 0, dHT: 0, rN: 0, rHT: 0, empty: true };
+        d.fcE = inMain ? p.e[i] : 0; d.fcLo = inMain ? p.lo[i] : 0; d.fcHi = inMain ? p.hi[i] : 0;
+        d.future = future && !x;
+        const v = d[ana.measure];
+        // Hors du mois principal, la prévision vaut 0 sans signalement : ces flux sont déjà
+        // listés dans l'Analyse, et un chargement de plusieurs mois serait sinon tout en rouge.
+        d.flag = inMain && !d.future && (v < d.fcLo - 1e-9 || v > d.fcHi + 1e-9);
+        out.push(d);
+      }
+      days = out.concat([...byDate.values()]);      // jours hors de la plage prévue (sans date...)
+      forecast = { mark: ana.measure === "dHT" ? "bar" : "line", label: "Prévision, " + (ana.measure === "dHT" ? "valeur HT" : "nombre") + " (0 hors " + monthLabelShort.format(new Date(utcOf(A.main + "-01"))) + ")" };
+    }
+    const dated = days.filter((d) => d.date && !d.empty && !d.future);
     const span = !dated.length ? "" : dated.length === 1 ? ", le " + dated[0].date : ", du " + dated[0].date + " au " + dated[dated.length - 1].date;
-    $("vizCaption").textContent = "Par jour : " + r.label + span;
+    $("vizCaptionText").textContent = "Par jour : " + r.label + span;
+    $("sMeasure").value = ana.measure;
     const slug = r.label.normalize("NFD").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "client";
     window.DayCharts.render($("viz"), {
       days, measures: MEASURES, series: SERIES, fmtDate: fmtDay,
-      title: $("vizCaption").textContent,
+      title: $("vizCaptionText").textContent,
       fileName: "graphe-" + slug + ".png",
+      forecast,
+      scrollTo: forecast ? A.main + "-01" : null,
       onExport: (err) => toast(err ? "Export impossible : " + errText(err) : "Image enregistrée dans vos téléchargements."),
     });
   }
 
-  function openSynth() {
+  let synthFrom = "list";
+  // clientKey : client à présélectionner (sinon celui du tableau) ; depuis l'analyse, Échap y revient.
+  function openSynth(clientKey) {
     if (!state.files.length) return;
-    savedScroll = $("tableWrap").scrollTop;
+    synthFrom = visibleScreen();
+    if (synthFrom === "list") savedScroll = $("tableWrap").scrollTop;
+    else anaScroll = $("aBody").scrollTop;
     buildSynth();
-    const i = state.client === null ? 0 : synth.rows.findIndex((r) => r.key === state.client);
+    buildAnalysis();                         // prévision du graphe
+    const want = clientKey !== undefined ? clientKey : state.client;
+    const i = want === null ? 0 : synth.rows.findIndex((r) => r.key === want);
     synth.sel = i < 0 ? 0 : i;
     $("sScope").textContent = plural(synth.rows[0].files, "fichier", "fichiers") + ", " + rangeText();
-    $("list").hidden = true;
+    $(synthFrom).hidden = true;
     $("synthScreen").hidden = false;
+    $("sBack").textContent = synthFrom === "anaScreen" ? "Retour à l'analyse" : "Retour au tableau";
     renderSynthScreen();
     $("sTableWrap").focus();
   }
@@ -1067,6 +1117,12 @@
   function closeSynth(clientKeyToShow) {
     if ($("synthScreen").hidden) return;
     $("synthScreen").hidden = true;
+    if (synthFrom === "anaScreen" && clientKeyToShow === undefined) {
+      $("anaScreen").hidden = false;
+      $("aBody").scrollTop = anaScroll;
+      $("aBody").focus();
+      return;
+    }
     $("list").hidden = false;
     if (clientKeyToShow !== undefined) {
       $("selClient").value = clientKeyToShow === null ? "" : "v:" + clientKeyToShow;
@@ -1084,12 +1140,46 @@
   // Un fichier au contenu identique à un autre n'est compté qu'une fois (il est signalé en doublon).
   const HORIZON = 7;                         // jours de prévision au-delà du dernier jour
   const wdFmt = new Intl.DateTimeFormat("fr-FR", { weekday: "short", timeZone: "UTC" });
+  const monthLabelShort = new Intl.DateTimeFormat("fr-FR", { month: "short", year: "numeric", timeZone: "UTC" });
   const utcOf = (iso) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10));
   const isoOf = (t) => new Date(t).toISOString().slice(0, 10);
   const dayName = (iso) => wdFmt.format(new Date(utcOf(iso)));
   const dayLabel = (iso) => iso + " (" + dayName(iso) + ")";
   const monthName = (ym) => monthLabel.format(new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7) - 1, 1)));
   const ana = { data: null, client: "", measure: "dHT" };
+  let anaScroll = 0;
+
+  // Liens de l'analyse : un fichier ouvre son détail, un client ouvre l'analyse client.
+  function fileLink(path, date) {
+    const a = el("button", "ana-link", path);
+    a.type = "button"; a.title = "Ouvrir le détail du fichier";
+    a.addEventListener("click", () => {
+      const f = state.files.find((x) => x.entry.path === path);
+      if (!f) return;
+      const rows = rowsOf(f, () => true, () => true);
+      openRow(rows.find((r) => r.date === date) || rows[0]);
+    });
+    return a;
+  }
+  function clientLink(label) {
+    const c = ana.data && [...ana.data.clients.values()].find((x) => x.label === label);
+    if (!c) return document.createTextNode(label);
+    const a = el("button", "ana-link", label);
+    a.type = "button"; a.title = "Ouvrir l'analyse client";
+    a.addEventListener("click", () => openSynth(c.key));
+    return a;
+  }
+  // Plusieurs liens dans une cellule : un par ligne (fichiers) ou séparés par des virgules (clients).
+  function links(items, make, perLine) {
+    const span = el("span", perLine ? "ana-lines" : "");
+    [...items].sort(cmpText).forEach((x, i) => {
+      if (i) span.appendChild(perLine ? el("br") : document.createTextNode(", "));
+      span.appendChild(make(x));
+    });
+    return span;
+  }
+  const fileLinks = (paths) => links(paths, (p) => fileLink(p), true);
+  const clientLinks = (labels) => links(labels, clientLink, false);
 
   // Jours manquants entre deux dates, regroupés en plages.
   function missingDays(first, last, present) {
@@ -1198,7 +1288,11 @@
     const tbody = el("tbody");
     rows.forEach((r) => {
       const row = el("tr", r.cls || "");
-      r.cells.forEach((v, i) => row.appendChild(el("td", headers[i].num ? "num" : "", v === undefined ? "" : String(v))));
+      r.cells.forEach((v, i) => {
+        const td = el("td", headers[i].num ? "num" : "");
+        if (v instanceof Node) td.appendChild(v); else td.textContent = v === undefined ? "" : String(v);
+        row.appendChild(td);
+      });
       tbody.appendChild(row);
     });
     if (!rows.length) { const row = el("tr"); const td = el("td", "ana-none", opts.empty || "Rien à signaler."); td.colSpan = headers.length; row.appendChild(td); tbody.appendChild(row); }
@@ -1256,12 +1350,12 @@
     const sm = section("aMonths", "Flux hors du mois principal");
     sm.appendChild(anaTable(
       [{ label: "Mois" }, { label: "Flux", num: true }, { label: "Valeur HT", num: true }, { label: "Refunds", num: true }, { label: "Refunds HT", num: true }, { label: "Clients" }],
-      [...A.months.keys()].sort().map((ym) => { const m = A.months.get(ym); return { cls: ym === A.main ? "main" : "warn", cells: [monthName(ym) + (ym === A.main ? " (principal)" : ""), fmtN(m.n), fmtE(m.ht), fmtN(m.rN), fmtE(m.rHT), listText(m.clients)] }; })));
+      [...A.months.keys()].sort().map((ym) => { const m = A.months.get(ym); return { cls: ym === A.main ? "main" : "warn", cells: [monthName(ym) + (ym === A.main ? " (principal)" : ""), fmtN(m.n), fmtE(m.ht), fmtN(m.rN), fmtE(m.rHT), clientLinks(m.clients)] }; })));
     const perClientOut = [];
     A.clients.forEach((c) => {
       let n = 0, ht = 0, rN = 0; const ms = new Set();
       c.days.forEach((x, d) => { if (d.slice(0, 7) !== A.main) { n += x.n; ht += x.ht; rN += x.rN; ms.add(monthName(d.slice(0, 7))); } });
-      if (n || rN) perClientOut.push({ cells: [c.label, fmtN(n), fmtE(ht), fmtN(rN), [...ms].join(", ")] });
+      if (n || rN) perClientOut.push({ cells: [clientLink(c.label), fmtN(n), fmtE(ht), fmtN(rN), [...ms].join(", ")] });
     });
     sm.appendChild(el("h3", null, "Par client"));
     sm.appendChild(anaTable([{ label: "Client" }, { label: "Flux hors mois", num: true }, { label: "Valeur HT", num: true }, { label: "Refunds", num: true }, { label: "Mois concernés" }], perClientOut, { empty: "Aucun client n'a de flux hors du mois principal." }));
@@ -1271,14 +1365,14 @@
     sd.appendChild(el("p", "ana-note", "Un jour est présent s'il porte au moins un enregistrement (dispense ou refund). Tous clients : du " + dayLabel(A.first) + " au " + dayLabel(A.last) + ", " + plural(glob.total, "jour", "jours") + "."));
     sd.appendChild(el("h3", null, "Mois principal, du " + dayLabel(mFirst) + " au " + dayLabel(mLast)));
     const mainRows = mainGlob.ranges.map((r) => ({ cls: "err", cells: ["Tous les clients", rangeLabel(r), plural(r.n, "jour", "jours")] }));
-    mainClients.sort((a, b) => cmpText(a.c.label, b.c.label)).forEach((g) => g.ranges.forEach((r) => mainRows.push({ cls: "err", cells: [g.c.label, rangeLabel(r), plural(r.n, "jour", "jours")] })));
+    mainClients.sort((a, b) => cmpText(a.c.label, b.c.label)).forEach((g) => g.ranges.forEach((r) => mainRows.push({ cls: "err", cells: [clientLink(g.c.label), rangeLabel(r), plural(r.n, "jour", "jours")] })));
     sd.appendChild(anaTable([{ label: "Client" }, { label: "Jours manquants" }, { label: "Durée", num: true }], mainRows, { empty: "Aucun jour manquant dans le mois principal." }));
     sd.appendChild(el("h3", null, "Tous clients, du premier au dernier jour (en rouge : dans le mois principal)"));
     sd.appendChild(anaTable([{ label: "Jours manquants" }, { label: "Durée", num: true }], glob.ranges.map((r) => ({ cls: inMain(r.from) || inMain(r.to) ? "err" : "warn", cells: [rangeLabel(r), plural(r.n, "jour", "jours")] })), { empty: "Aucun jour manquant." }));
     sd.appendChild(el("h3", null, "Par client (entre son premier et son dernier jour)"));
     sd.appendChild(anaTable(
       [{ label: "Client" }, { label: "Premier jour" }, { label: "Dernier jour" }, { label: "Jours", num: true }, { label: "Manquants", num: true }, { label: "Écarts" }],
-      clientGaps.sort((a, b) => cmpText(a.c.label, b.c.label)).map((g) => ({ cls: g.ranges.some((r) => inMain(r.from) || inMain(r.to)) ? "err" : g.missing ? "warn" : "", cells: [g.c.label, dayLabel(g.first), dayLabel(g.last), fmtN(g.total), fmtN(g.missing), g.ranges.map(rangeLabel).join(" ; ")] }))));
+      clientGaps.sort((a, b) => cmpText(a.c.label, b.c.label)).map((g) => ({ cls: g.ranges.some((r) => inMain(r.from) || inMain(r.to)) ? "err" : g.missing ? "warn" : "", cells: [clientLink(g.c.label), dayLabel(g.first), dayLabel(g.last), fmtN(g.total), fmtN(g.missing), g.ranges.map(rangeLabel).join(" ; ")] }))));
 
     // 3. Doublons
     const sdup = section("aDups", "Doublons");
@@ -1287,14 +1381,14 @@
       A.identical.map((g) => {
         const cl = new Set(), ds = new Set();
         g[0].res.units.forEach((u) => { cl.add(u.label); u.dates.forEach((_a, d) => ds.add(d)); });
-        return { cls: "err", cells: [g[0].hash.slice(0, HASH_LEN), g.map((f) => f.entry.path).join(", "), listText(cl), listText(ds, 6)] };
+        return { cls: "err", cells: [g[0].hash.slice(0, HASH_LEN), fileLinks(g.map((f) => f.entry.path)), clientLinks(cl), listText(ds, 6)] };
       }), { empty: "Aucun fichier identique." }));
     sdup.appendChild(el("h3", null, "Flux et refunds (même InvoiceID) présents dans plusieurs fichiers"));
     sdup.appendChild(anaTable([{ label: "Fichiers" }, { label: "Flux communs", num: true }, { label: "Refunds communs", num: true }, { label: "Clients" }, { label: "Jours" }],
-      A.shared.sort((a, b) => b.n + b.r - a.n - a.r).map((s) => ({ cls: "err", cells: [s.files.join(", "), fmtN(s.n), fmtN(s.r), listText(s.clients), listText(s.dates, 6)] })), { empty: "Aucun enregistrement commun à plusieurs fichiers." }));
+      A.shared.sort((a, b) => b.n + b.r - a.n - a.r).map((s) => ({ cls: "err", cells: [fileLinks(s.files), fmtN(s.n), fmtN(s.r), clientLinks(s.clients), listText(s.dates, 6)] })), { empty: "Aucun enregistrement commun à plusieurs fichiers." }));
     sdup.appendChild(el("h3", null, "Flux répétés dans un même fichier"));
     sdup.appendChild(anaTable([{ label: "Fichier" }, { label: "Client" }, { label: "Jour" }, { label: "Répétitions", num: true }],
-      A.repeated.map((r) => ({ cls: "err", cells: [r.path, r.client, dayLabel(r.date), fmtN(r.n)] })), { empty: "Aucun flux répété." }));
+      A.repeated.map((r) => ({ cls: "err", cells: [fileLink(r.path, r.date), clientLink(r.client), dayLabel(r.date), fmtN(r.n)] })), { empty: "Aucun flux répété." }));
 
     // 4. Prévision
     const sf = section("aFc", "Graphe et enveloppe prévisionnelle");
@@ -1320,7 +1414,7 @@
       .map((z) => {
         const act = z.flags.reduce((s, f) => s + f.actual, 0), exp = z.flags.reduce((s, f) => s + f.expected, 0);
         const d0 = isoOf(fcm.t0 + (z.off + z.from) * Analysis.DAY), d1 = isoOf(fcm.t0 + (z.off + z.to) * Analysis.DAY);
-        return { cls: "warn", sortKey: Math.abs(act - exp), cells: [z.label, rangeLabel({ from: d0, to: d1 }), fmtN(z.to - z.from + 1), fmV(act), fmV(exp), (exp ? (act >= exp ? "+" : "") + fmtTick.format(Math.round((act - exp) / exp * 100)) + " %" : "–")] };
+        return { cls: "warn", sortKey: Math.abs(act - exp), cells: [z.label === "Tous les clients" ? z.label : clientLink(z.label), rangeLabel({ from: d0, to: d1 }), fmtN(z.to - z.from + 1), fmV(act), fmV(exp), (exp ? (act >= exp ? "+" : "") + fmtTick.format(Math.round((act - exp) / exp * 100)) + " %" : "–")] };
       }).sort((a, b) => b.sortKey - a.sortKey);
     sf.appendChild(anaTable([{ label: "Client" }, { label: "Période" }, { label: "Jours", num: true }, { label: "Réel", num: true }, { label: "Prévu", num: true }, { label: "Écart", num: true }], zoneRows, { empty: "Aucun jour hors enveloppe." }));
 
@@ -1732,7 +1826,7 @@
   });
   $("recursive").addEventListener("change", load);
   $("csv").addEventListener("click", exportCsv);
-  $("openSynth").addEventListener("click", openSynth);
+  $("openSynth").addEventListener("click", () => openSynth());
   $("openAnalysis").addEventListener("click", openAnalysis);
   $("aBack").addEventListener("click", closeAnalysis);
   $("version").addEventListener("click", checkUpdate);
@@ -1777,6 +1871,8 @@
   });
 
   document.addEventListener("keydown", (e) => {
+    // Touche déjà traitée (par exemple Échap dans la visionneuse, qui vient de la fermer).
+    if (e.defaultPrevented) return;
     const tag = e.target.tagName;
     // On laisse la frappe aux champs de saisie ; une case à cocher ne bloque pas les raccourcis.
     if (tag === "TEXTAREA" || tag === "SELECT" || (tag === "INPUT" && e.target.type !== "checkbox")) return;
@@ -1839,6 +1935,7 @@
   });
 
   $("sBack").addEventListener("click", () => closeSynth());
+  $("sMeasure").addEventListener("change", (e) => { ana.measure = e.target.value; selectSynth(synth.sel, false); $("sTableWrap").focus(); });
   $("sBody").addEventListener("click", (e) => {
     const tr = e.target.closest("tr");
     if (!tr) return;

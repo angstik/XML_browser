@@ -214,7 +214,7 @@
     row.appendChild(scroller);
     row.appendChild(right);
     host.appendChild(row);
-    return { bands, scroller, left, right, plot, height: h, width: w, axisTitles: [bar.axis + " : barres", line.axis + " : courbes"] };
+    return { bands, scroller, left, right, plot, height: h, width: w, slot, axisTitles: [bar.axis + " : barres", line.axis + " : courbes"] };
   }
 
   // ---- Export en image ----------------------------------------------------
@@ -406,6 +406,11 @@
       drawn.scroller.scrollLeft = scrolled;
     }
     draw();
+    // Position de départ : le jour demandé (par exemple le début du mois principal) à gauche.
+    if (cfg.scrollTo && drawn) {
+      const i = slots.findIndex((d) => d.date >= cfg.scrollTo);
+      if (i > 0) drawn.scroller.scrollLeft = Math.max(0, i * drawn.slot - 24);
+    }
     if (window.ResizeObserver) {
       root._vizObserver = new ResizeObserver(draw);
       root._vizObserver.observe(plots);
