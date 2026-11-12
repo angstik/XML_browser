@@ -163,7 +163,8 @@ try {
   assert.equal(await page.$$eval("#viz .viz-line", (l) => l.length), 2, "une courbe par série");
   assert.equal(await page.$$eval("#viz .viz-dot", (d) => d.length), 6, "3 jours × 2 séries");
   assert.deepEqual(await page.$$eval("#viz .viz-key", (k) => k.map((x) => x.textContent)),
-    ["Dispense, valeur HT", "Refund, valeur HT", "Dispense, nombre", "Refund, nombre", "Prévision, valeur HT (0 hors janv. 2026)"]);
+    ["Dispense, valeur HT", "Refund, valeur HT", "Dispense, nombre", "Refund, nombre", "Prévision, valeur HT (0 hors janv. 2026)", "Samedi et dimanche"]);
+  assert.ok(await page.$$eval("#viz .viz-weekend", (r) => r.length) >= 2, "week-ends repérés");
   // Le 1er janvier ouvre l'axe : un trait de début de mois, avec son libellé.
   assert.deepEqual(await page.$$eval("#viz .viz-month-label", (t) => t.map((x) => x.textContent)), ["janv. 2026"]);
   // Export en image : un PNG valide, plus large que haut.
